@@ -1,42 +1,92 @@
 import NextAuth from "next-auth";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
 import dbConnect from "@/lib/dbConnect";
 import User from "@/model/userModel";
+import { verifyPassword } from "@/lib/password";
+
+const providers = [
+  Credentials({
+    name: "Credentials",
+    credentials: {
+      email: { label: "Email", type: "email" },
+      password: { label: "Password", type: "password" },
+    },
+    async authorize(credentials) {
+      const email = credentials?.email?.toString().trim().toLowerCase();
+      const password = credentials?.password?.toString();
+
+      if (!email || !password) return null;
+
+      await dbConnect();
+      const user = await User.findOne({ email }).select("+password");
+      if (!user?.password) return null;
+
+      const valid = await verifyPassword(password, user.password);
+      if (!valid) return null;
+
+      return {
+        id: (user as any)._id.toString(),
+        name: `${user.firstName} ${user.lastName}`.trim(),
+        email: user.email,
+        image: user.profilePicture,
+      };
+    },
+  }),
+];
+
+if (process.env.GITHUB_ID && process.env.GITHUB_SECRET) {
+  providers.push(
+    GitHub({
+      clientId: process.env.GITHUB_ID,
+      clientSecret: process.env.GITHUB_SECRET,
+    })
+  );
+}
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  providers.push(
+    Google({
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    })
+  );
+}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [
-    GitHub({
-      clientId: process.env.GITHUB_ID!,
-      clientSecret: process.env.GITHUB_SECRET!,
-    }),
-    Google({
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    })
-  ],
+  providers,
   secret: process.env.AUTH_SECRET,
+  session: { strategy: "jwt" },
+  pages: {
+    signIn: "/auth/login",
+  },
   callbacks: {
     async signIn({ user, account }) {
       if (!user.email) return false;
+
+      if (account?.provider === "credentials") {
+        return true;
+      }
 
       try {
         await dbConnect();
         const existingUser = await User.findOne({ email: user.email });
 
         if (!existingUser) {
-          // Create new user
           await User.create({
             email: user.email,
-            firstName: user.name?.split(' ')[0] || 'User',
-            lastName: user.name?.split(' ').slice(1).join(' ') || '',
+            firstName: user.name?.split(" ")[0] || "User",
+            lastName: user.name?.split(" ").slice(1).join(" ") || "User",
             profilePicture: user.image,
-            oauthProviders: [{
-              provider: account?.provider || 'unknown',
-              providerId: account?.providerAccountId || 'unknown',
-            }],
+            oauthProviders: [
+              {
+                provider: account?.provider || "unknown",
+                providerId: account?.providerAccountId || "unknown",
+              },
+            ],
             isEmailVerified: true,
-            role: 'user', // Default role
+            role: "user",
           });
         }
         return true;
@@ -46,7 +96,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
     },
     async jwt({ token, user }) {
-      if (user && user.email) {
+      if (user?.email) {
         try {
           await dbConnect();
           const dbUser = await User.findOne({ email: user.email });
@@ -62,7 +112,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (session.user && token.id) {
-        session.user.id = token.id as string;
+        (session.user as any).id = token.id as string;
         (session.user as any).role = token.role;
       }
       return session;

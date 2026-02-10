@@ -11,9 +11,8 @@ import githubLogo from "@/public/icons8-github.svg";
 
 type ProviderInfo = { id: string; name: string };
 
-export default function SignupPage() {
+export default function LoginClient({ callbackUrl }: { callbackUrl: string }) {
   const router = useRouter();
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -48,50 +47,45 @@ export default function SignupPage() {
     setError("");
     setLoading(true);
 
-    const response = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), email: email.trim(), password }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      setLoading(false);
-      setError(data.error || "Unable to create account");
-      return;
-    }
-
-    const signInResult = await signIn("credentials", {
-      email: email.trim(),
+    const result = await signIn("credentials", {
+      email,
       password,
       redirect: false,
-      callbackUrl: "/dashboard",
+      callbackUrl,
     });
 
     setLoading(false);
 
-    if (signInResult?.error) {
-      router.push("/auth/login");
+    if (result?.error) {
+      setError("Invalid email or password");
       return;
     }
 
-    router.push("/dashboard");
+    router.push(callbackUrl);
     router.refresh();
   };
 
   return (
     <div className="min-h-screen bg-[#05080d] text-white p-4 md:p-8">
       <div className="mx-auto max-w-[1550px] min-h-[92vh] border border-[#3f3f45] p-6 md:p-8 flex flex-col lg:flex-row gap-8">
-        <div className="w-full lg:w-[470px] flex items-center">
-          <form onSubmit={handleSubmit} className="w-full space-y-4">
+        <div className="hidden lg:flex flex-1 border border-white/20 bg-[radial-gradient(circle_at_45%_38%,rgba(107,188,255,.35),rgba(8,11,19,0)_35%),linear-gradient(180deg,#0d121b_0%,#070b12_100%)] relative overflow-hidden">
+          <div className="absolute inset-0 opacity-15 bg-[url('/dashboard.svg')] bg-cover bg-center" />
+          <div className="relative z-10 flex items-center justify-center w-full p-8">
+            <div className="grid grid-cols-2 gap-5 max-w-3xl">
+              <InfoCard title="Analytics Dashboard" text="Track clicks, locations, and devices with an intuitive analytics view." />
+              <InfoCard title="Quick & Advanced" text="Switch between fast link creation and advanced controls for deeper customization." offset />
+            </div>
+          </div>
+        </div>
+
+        <div className="w-full lg:w-[430px] flex items-center">
+          <form onSubmit={handleSubmit} className="w-full space-y-5">
             <Logo />
-            <div className="pt-4">
-              <h1 className="text-[44px] font-semibold leading-tight">Create a free account</h1>
+            <div>
+              <h1 className="text-[44px] font-semibold leading-tight">Welcome Back</h1>
               <p className="text-gray-400 mt-1.5">Join LinkHive – Shorten Smarter, Share Faster, Track Better</p>
             </div>
 
-            <Field label="Name" value={name} onChange={setName} placeholder="Enter your name" />
             <Field label="Email" value={email} onChange={setEmail} placeholder="Enter your E-mail" type="email" />
             <Field label="Password" value={password} onChange={setPassword} placeholder="Enter password" type="password" />
 
@@ -102,10 +96,10 @@ export default function SignupPage() {
               disabled={loading}
               className="w-full rounded-full bg-white text-black font-semibold py-3.5 hover:bg-gray-200 disabled:opacity-70"
             >
-              {loading ? "Creating account..." : "Create my account"}
+              {loading ? "Logging in..." : "Log In"}
             </button>
 
-            <div className="pt-1">
+            <div>
               <div className="flex items-center gap-3 text-gray-400 text-xs">
                 <div className="h-px bg-white/15 flex-1" />
                 <span>or continue with</span>
@@ -128,25 +122,11 @@ export default function SignupPage() {
               </div>
             </div>
 
-            <p className="text-center text-gray-400 text-sm pt-1">
-              Already have an account?{" "}
-              <Link href="/auth/login" className="text-white hover:text-blue-300">Log In</Link>
+            <p className="text-center text-gray-400 text-sm">
+              Don&apos;t have an account?{" "}
+              <Link href="/auth/signup" className="text-white hover:text-blue-300">Register</Link>
             </p>
           </form>
-        </div>
-
-        <div className="flex-1 border border-white/20 relative overflow-hidden bg-[radial-gradient(circle_at_70%_35%,rgba(108,181,255,.4),transparent_35%),linear-gradient(180deg,#0b121d_0%,#070b13_100%)] min-h-[420px]">
-          <div className="absolute inset-0 opacity-20 bg-[url('/dashboard.svg')] bg-cover bg-center" />
-          <div className="relative z-10 h-full grid place-items-center p-8">
-            <div className="max-w-[540px] rounded-2xl border border-white/35 bg-black/45 backdrop-blur p-8">
-              <p className="text-2xl">★★★★★</p>
-              <h3 className="text-[40px] font-semibold mt-4 leading-tight">&ldquo;Perfect for my blog&rdquo;</h3>
-              <p className="text-gray-200 mt-6 leading-relaxed text-[28px]">
-                I run a small blog and use it to shorten links for my posts. The quick mode is amazing, and once I started using the advanced features, it felt like I had leveled up my whole site.
-              </p>
-              <p className="mt-6 text-gray-300 text-[28px]">Priya S.<br />Blogger</p>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -162,10 +142,18 @@ function Field({ label, value, onChange, placeholder, type = "text" }: { label: 
         onChange={(e) => onChange(e.target.value)}
         type={type}
         required
-        minLength={type === "password" ? 8 : undefined}
         placeholder={placeholder}
         className="w-full rounded-full border border-white/20 bg-transparent px-5 py-3 focus:outline-none focus:border-blue-400"
       />
+    </div>
+  );
+}
+
+function InfoCard({ title, text, offset = false }: { title: string; text: string; offset?: boolean }) {
+  return (
+    <div className={`rounded-2xl border border-white/20 bg-black/35 backdrop-blur px-5 py-6 ${offset ? "mt-12" : ""}`}>
+      <h3 className="text-xl font-semibold">{title}</h3>
+      <p className="text-sm text-gray-300 mt-2 leading-relaxed">{text}</p>
     </div>
   );
 }

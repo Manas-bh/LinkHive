@@ -19,7 +19,7 @@ import { IClickDetail } from "@/model/urlModel";
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await dbConnect();
@@ -40,7 +40,7 @@ export async function GET(
       );
     }
 
-    const { id } = params;
+    const { id } = await params;
     const campaign = await Campaign.findById(id);
 
     if (!campaign) {

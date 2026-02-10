@@ -1,7 +1,16 @@
 "use client";
 
-import { X, Download, Copy, Check } from "lucide-react";
-import { useState } from "react";
+import {
+  X,
+  Download,
+  Copy,
+  Check,
+  Link2,
+  Instagram,
+  Facebook,
+  Mail,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
 
 interface LinkReadyModalProps {
@@ -21,6 +30,42 @@ export default function LinkReadyModal({
 }: LinkReadyModalProps) {
   const [copied, setCopied] = useState(false);
 
+  const socialShares = useMemo(
+    () => [
+      {
+        name: "WhatsApp",
+        href: `https://wa.me/?text=${encodeURIComponent(shortUrl)}`,
+        icon: <span className="text-sm font-bold">WA</span>,
+      },
+      {
+        name: "Instagram",
+        href: "https://www.instagram.com/",
+        icon: <Instagram className="w-4 h-4" />,
+      },
+      {
+        name: "Facebook",
+        href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shortUrl)}`,
+        icon: <Facebook className="w-4 h-4" />,
+      },
+      {
+        name: "X",
+        href: `https://twitter.com/intent/tweet?url=${encodeURIComponent(shortUrl)}`,
+        icon: <span className="text-sm font-bold">X</span>,
+      },
+      {
+        name: "Gmail",
+        href: `mailto:?body=${encodeURIComponent(shortUrl)}`,
+        icon: <Mail className="w-4 h-4" />,
+      },
+      {
+        name: "Threads",
+        href: "https://www.threads.net/",
+        icon: <span className="text-sm font-bold">@</span>,
+      },
+    ],
+    [shortUrl]
+  );
+
   if (!isOpen) return null;
 
   const copyToClipboard = () => {
@@ -36,151 +81,86 @@ export default function LinkReadyModal({
     link.click();
   };
 
-  const socialShares = [
-    {
-      name: "WhatsApp",
-      icon: "/icons/whatsapp.svg",
-      color: "bg-green-600",
-      url: `https://wa.me/?text=${encodeURIComponent(shortUrl)}`,
-    },
-    {
-      name: "Instagram",
-      icon: "/icons/instagram.svg",
-      color: "bg-gradient-to-br from-purple-600 to-pink-600",
-      url: "#", // Instagram doesn't support direct sharing
-    },
-    {
-      name: "Facebook",
-      icon: "/icons/facebook.svg",
-      color: "bg-blue-600",
-      url: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(
-        shortUrl
-      )}`,
-    },
-    {
-      name: "X",
-      icon: "/icons/x.svg",
-      color: "bg-black",
-      url: `https://twitter.com/intent/tweet?url=${encodeURIComponent(
-        shortUrl
-      )}`,
-    },
-    {
-      name: "Email",
-      icon: "/icons/email.svg",
-      color: "bg-gray-600",
-      url: `mailto:?body=${encodeURIComponent(shortUrl)}`,
-    },
-    {
-      name: "Threads",
-      icon: "/icons/threads.svg",
-      color: "bg-black",
-      url: "#", // Threads doesn't have direct sharing URL yet
-    },
-  ];
-
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 rounded-2xl max-w-md w-full p-8 relative border border-gray-800 shadow-2xl">
-        {/* Close Button */}
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 grid place-items-center">
+      <div className="relative max-w-[470px] w-full rounded-2xl border border-white/30 bg-[#111216] p-7 shadow-[0_25px_50px_rgba(0,0,0,.6)]">
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-white transition-colors"
+          className="absolute right-5 top-5 text-gray-400 hover:text-white"
         >
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header */}
-        <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-white mb-2">
-            Your Short Link is Ready! ⭐
+        <div className="text-center">
+          <h2 className="text-4xl font-bold text-white leading-tight">
+            Your Short Link is Ready! 🌟
           </h2>
-          <p className="text-sm text-gray-400">
+          <p className="text-gray-400 mt-3">
             Share it, track it, or save it - your link is ready for action!
           </p>
         </div>
 
-        {/* QR Code */}
-        <div className="bg-white rounded-xl p-6 mb-6 flex items-center justify-center">
+        <div className="mx-auto mt-7 w-fit rounded-xl bg-white p-3">
           <Image
             src={qrCode}
             alt="QR Code"
-            width={192}
-            height={192}
-            className="w-48 h-48"
+            width={180}
+            height={180}
+            className="w-[180px] h-[180px]"
             unoptimized
           />
         </div>
 
-        {/* Short URL */}
-        <div className="bg-gray-800 rounded-lg p-4 mb-4">
-          <p className="text-blue-400 font-medium text-center truncate">
-            {shortUrl}
-          </p>
+        <div className="mt-6 text-center text-2xl text-[#4b9bff] font-medium break-all">
+          {shortUrl}
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex gap-2 mb-6">
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={downloadQR}
+            className="flex-1 rounded-lg bg-[#3579ea] text-white py-2.5 flex items-center justify-center gap-2 hover:bg-[#2a67cb]"
+          >
+            <Download className="w-4 h-4" />
+            Download PNG
+          </button>
+          <button
+            onClick={copyToClipboard}
+            className="rounded-lg bg-[#2f3440] text-white px-4 hover:bg-[#414857]"
+            aria-label="Copy link"
+          >
+            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+          </button>
+        </div>
+
+        <div className="mt-5 flex gap-3">
           <button
             onClick={onCreateNew}
-            className="flex-1 px-4 py-2.5 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+            className="flex-1 rounded-lg border border-white/10 bg-[#2a2e37] py-2.5 text-white hover:bg-[#383d47] flex items-center justify-center gap-2"
           >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
+            <Link2 className="w-4 h-4" />
             Create new link
           </button>
           <button
             onClick={copyToClipboard}
-            className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+            className="flex-1 rounded-lg bg-[#3579ea] py-2.5 text-white hover:bg-[#2a67cb]"
           >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                Copy link
-              </>
-            )}
+            {copied ? "Copied!" : "Copy link"}
           </button>
         </div>
 
-        {/* Download Button */}
-        <button
-          onClick={downloadQR}
-          className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 mb-6"
-        >
-          <Download className="w-4 h-4" />
-          Download PNG
-        </button>
-
-        {/* Social Sharing */}
-        <div className="grid grid-cols-6 gap-3">
+        <div className="mt-7 grid grid-cols-6 gap-2">
           {socialShares.map((social) => (
             <a
               key={social.name}
-              href={social.url}
+              href={social.href}
               target="_blank"
-              rel="noopener noreferrer"
-              className={`${social.color} w-12 h-12 rounded-xl flex items-center justify-center hover:opacity-80 transition-opacity`}
-              title={social.name}
+              rel="noreferrer"
+              className="rounded-lg border border-white/10 bg-[#2b2e36] py-2 px-1 text-center text-[10px] text-gray-300 hover:bg-[#3a3f49]"
             >
-              <span className="text-white text-xs font-semibold">
-                {social.name.charAt(0)}
-              </span>
+              <div className="mx-auto mb-1 grid place-items-center text-white">
+                {social.icon}
+              </div>
+              {social.name}
             </a>
           ))}
         </div>
