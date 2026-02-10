@@ -1,176 +1,162 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import Image from "next/image";
-import React, { JSX } from "react";
+"use client";
+
+import { FormEvent, useState } from "react";
+import Link from "next/link";
+import Image, { StaticImageData } from "next/image";
+import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import Logo from "@/components/Logo";
-import testimonialImage from "@/public/signupTestmonial.svg";
-import appleLogo from "@/public/icons8-apple.svg";
 import googleLogo from "@/public/icons8-google.svg";
-import facebookLogo from "@/public/icons8-facebook.svg";
 import githubLogo from "@/public/icons8-github.svg";
+import facebookLogo from "@/public/icons8-facebook.svg";
+import appleLogo from "@/public/icons8-apple.svg";
 
-export default function SignupPage(): JSX.Element {
+export default function SignupPage() {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    const response = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, email, password }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setLoading(false);
+      setError(data.error || "Unable to create account");
+      return;
+    }
+
+    const signInResult = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+      callbackUrl: "/dashboard",
+    });
+
+    setLoading(false);
+
+    if (signInResult?.error) {
+      router.push("/auth/login");
+      return;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
+  };
+
   return (
-    <div className="h-screen bg-[#080a0c] flex items-center justify-center overflow-hidden">
-      <div className="flex flex-col md:flex-row max-w-[1728px] w-full h-[95vh] md:h-[1117px] justify-around items-center md:px-8">
-        {/* Left side - Sign up form - made more bounded */}
-        <div className="flex flex-col items-start justify-center max-w-sm md:max-w-xs lg:max-w-sm shrink-0">
-          <div className="w-[] px-6 md:px-0">
-            <div className="flex flex-col w-full items-start gap-[31px]">
-              {/* Logo */}
-              <div className="inline-flex items-center gap-2">
-                <Logo />
+    <div className="min-h-screen bg-[#04070c] text-white p-4 md:p-6">
+      <div className="mx-auto max-w-[1400px] min-h-[92vh] border border-white/20 p-6 md:p-8 flex flex-col lg:flex-row gap-10 rounded-sm">
+        <div className="w-full lg:w-[420px] flex items-center">
+          <form onSubmit={handleSubmit} className="w-full space-y-5">
+            <Logo />
+            <div>
+              <h1 className="text-4xl font-bold">Create a free account</h1>
+              <p className="text-gray-400 mt-2">Join LinkHive – Shorten Smarter, Share Faster, Track Better</p>
+            </div>
+
+            <Field label="Name" value={name} onChange={setName} placeholder="Enter your name" />
+            <Field label="Email" value={email} onChange={setEmail} placeholder="Enter your E-mail" type="email" />
+            <Field label="Password" value={password} onChange={setPassword} placeholder="Enter password" type="password" />
+
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full rounded-full bg-white text-black font-semibold py-3 hover:bg-gray-200 disabled:opacity-70"
+            >
+              {loading ? "Creating account..." : "Create my account"}
+            </button>
+
+            <div className="pt-1">
+              <div className="flex items-center gap-3 text-gray-400 text-xs">
+                <div className="h-px bg-white/15 flex-1" />
+                <span>or continue with</span>
+                <div className="h-px bg-white/15 flex-1" />
               </div>
 
-              {/* Heading */}
-              <div className="flex flex-col items-start gap-[11px] w-full">
-                <h1 className="text-white text-[28px] font-medium mt-[-1px]">
-                  Create a free account
-                </h1>
-                <p className="text-[#afafaf] text-base font-medium">
-                  Join LinkHive – Shorten Smarter, Share Faster, Track Better
-                </p>
-              </div>
-
-              {/* Form - made more compact */}
-              <div className="flex flex-col w-full items-center gap-[30px]">
-                <div className="flex flex-col items-start gap-6 w-full">
-                  {/* Name field */}
-                  <div className="flex flex-col items-start gap-[11px] w-full">
-                    <label className="text-[#e6e6e6] text-xl font-semibold mt-[-1px]">
-                      Name
-                    </label>
-                    <Input
-                      placeholder="Enter your name"
-                      className="pl-6 py-4 h-auto rounded-[42px] text-[#a7a7a7] text-base bg-transparent"
-                    />
-                  </div>
-
-                  {/* Email field */}
-                  <div className="flex flex-col items-start gap-[11px] w-full">
-                    <label className="text-[#e6e6e6] text-xl font-semibold mt-[-1px]">
-                      Email
-                    </label>
-                    <Input
-                      placeholder="Enter your E-mail"
-                      className="pl-6 py-4 h-auto rounded-[42px] text-[#a7a7a7] text-base bg-transparent"
-                    />
-                  </div>
-
-                  {/* Password field */}
-                  <div className="flex flex-col items-start gap-[11px] w-full">
-                    <label className="text-[#e6e6e6] text-xl font-semibold mt-[-1px]">
-                      Password
-                    </label>
-                    <Input
-                      type="password"
-                      placeholder="Enter password"
-                      className="pl-6 py-4 h-auto rounded-[42px] text-[#a7a7a7] text-base bg-transparent"
-                    />
-                  </div>
-                </div>
-
-                {/* Buttons and social login */}
-                <div className="flex flex-col items-center gap-7 w-full">
-                  <Button className="w-full px-[101px] py-4 h-auto rounded-[42px] bg-white text-black font-semibold text-base">
-                    Create my account
-                  </Button>
-
-                  {/* Divider */}
-                  <div className="flex items-center w-full">
-                    <Separator className="w-full" />
-                    <span className="px-1 text-[#a7a7a7] text-xs bg-[#080a0c] absolute left-1/2 transform -translate-x-1/2">
-                      or continue with
-                    </span>
-                  </div>
-
-                  {/* Social login buttons */}
-                  <div className="flex items-center justify-center gap-4 w-full">
-                    {/* Google */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="w-12 h-12 rounded-full bg-white p-0 flex items-center justify-center border border-gray-200 hover:bg-gray-100"
-                    >
-                      <Image
-                        src={googleLogo}
-                        alt="Google"
-                        width={24}
-                        height={24}
-                        className="object-contain"
-                      />
-                    </Button>
-
-                    {/* GitHub */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="w-12 h-12 rounded-full bg-white p-0 flex items-center justify-center border border-gray-200 hover:bg-gray-100"
-                    >
-                      <Image
-                        src={githubLogo}
-                        alt="GitHub"
-                        width={24}
-                        height={24}
-                        className="object-contain"
-                      />
-                    </Button>
-
-                    {/* Facebook */}
-                    <Button
-                      size="icon"
-                      className="w-12 h-12 rounded-full bg-[#1977f2] p-0 flex items-center justify-center hover:bg-[#1466d8]"
-                    >
-                      <Image
-                        src={facebookLogo}
-                        alt="Facebook"
-                        width={24}
-                        height={24}
-                        className="object-contain"
-                      />
-                    </Button>
-
-                    {/* Apple */}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="w-12 h-12 rounded-full bg-black p-0 flex items-center justify-center border border-gray-700 hover:bg-gray-900"
-                    >
-                      <Image
-                        src={appleLogo}
-                        alt="Apple"
-                        width={24}
-                        height={24}
-                        className="object-contain"
-                      />
-                    </Button>
-                  </div>
-                </div>
+              <div className="mt-4 flex justify-center gap-3">
+                <OAuthCircle icon={googleLogo} label="Google" onClick={() => signIn("google", { callbackUrl: "/dashboard" })} />
+                <OAuthCircle icon={githubLogo} label="GitHub" onClick={() => signIn("github", { callbackUrl: "/dashboard" })} />
+                <OAuthCircle icon={facebookLogo} label="Facebook" disabled />
+                <OAuthCircle icon={appleLogo} label="Apple" disabled />
               </div>
             </div>
 
-            {/* Login link */}
-            <div className="w-full text-center mt-8 text-base">
-              <span className="text-[#a7a7a7]">Already have an account? </span>
-              <span className="text-white cursor-pointer">Log In</span>
-            </div>
-          </div>
+            <p className="text-center text-gray-400 text-sm pt-1">
+              Already have an account?{" "}
+              <Link href="/auth/login" className="text-white hover:text-blue-300">Log In</Link>
+            </p>
+          </form>
         </div>
 
-        {/* Right side - Testimonial */}
-        <div className="hidden md:block w-full max-w-xl">
-          <div className="relative w-full aspect-[4/5]">
-            <Image
-              src={testimonialImage}
-              alt="Testimonial"
-              fill
-              className="object-contain"
-              priority
-            />
+        <div className="flex-1 border border-white/20 rounded-sm relative overflow-hidden bg-[radial-gradient(circle_at_70%_35%,rgba(108,181,255,.32),transparent_35%),linear-gradient(180deg,#0a1019_0%,#070b13_100%)] min-h-[420px]">
+          <div className="absolute inset-0 opacity-25 bg-[url('/dashboard.svg')] bg-cover bg-center" />
+          <div className="relative z-10 h-full grid place-items-center p-8">
+            <div className="max-w-lg rounded-2xl border border-white/30 bg-black/45 backdrop-blur p-6 md:p-8">
+              <p className="text-2xl">★★★★★</p>
+              <h3 className="text-3xl font-semibold mt-3">&ldquo;Perfect for my blog&rdquo;</h3>
+              <p className="text-gray-200 mt-6 leading-relaxed">I run a small blog and use it to shorten links for my posts. The quick mode is amazing, and once I started using the advanced features, it felt like I had leveled up my whole site.</p>
+              <p className="mt-6 text-gray-300">Priya S.<br/>Blogger</p>
+            </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+}) {
+  return (
+    <div>
+      <label className="block mb-2 text-sm">{label}</label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        type={type}
+        required
+        placeholder={placeholder}
+        className="w-full rounded-full border border-white/20 bg-transparent px-5 py-3 focus:outline-none focus:border-blue-400"
+      />
+    </div>
+  );
+}
+
+function OAuthCircle({ icon, label, onClick, disabled = false }: { icon: StaticImageData; label: string; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={disabled ? `${label} coming soon` : label}
+      className="h-12 w-12 rounded-full bg-white grid place-items-center hover:bg-gray-200 disabled:opacity-50"
+    >
+      <Image src={icon} alt={label} width={22} height={22} />
+    </button>
   );
 }
