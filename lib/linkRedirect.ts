@@ -48,9 +48,9 @@ export async function resolveLinkAndTrack(code: string, request: NextRequest) {
 
   let geoData: Awaited<ReturnType<typeof getGeolocation>>;
   try {
-    geoData = await Promise.race([
+    geoData = await Promise.race<Awaited<ReturnType<typeof getGeolocation>>>([
       getGeolocation(ip),
-      new Promise((_, reject) =>
+      new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Geolocation timeout")), 2000)
       ),
     ]);
