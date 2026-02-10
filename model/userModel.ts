@@ -184,8 +184,6 @@ UserSchema.index({ 'oauthProviders.provider': 1, 'oauthProviders.providerId': 1 
 // Create index for subscription expiration to enable efficient querying
 UserSchema.index({ 'subscription.expiresAt': 1 });
 
-// Add an index for email lookups
-UserSchema.index({ email: 1 });
 
 // Create and export the model
 const User = mongoose.model<IUser>('User', UserSchema);
