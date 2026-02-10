@@ -1,16 +1,60 @@
+"use client";
+
 import Image from "next/image";
 import React, { useState, useEffect } from "react";
 import arrow from "@/public/line-md_arrow-up.svg";
 import clipboard from "@/public/clipboard.svg";
+import LinkReadyModal from "@/components/LinkReadyModal";
 
 const URLshortInput = () => {
   const [placeholder, setPlaceholder] = useState("Enter your URL here");
   const [inputValue, setInputValue] = useState("");
   const [copyStatus, setCopyStatus] = useState(""); // For feedback message
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [createdLink, setCreatedLink] = useState<{
+    shortUrl: string;
+    qrCode?: string;
+  } | null>(null);
 
   // Handle input change
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputValue(e.target.value);
+  };
+
+  const handleShorten = async () => {
+    if (!inputValue.trim()) {
+      setError("Please paste a URL first");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/public/url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: inputValue.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to shorten link");
+      }
+
+      setCreatedLink(data.data);
+      setModalOpen(true);
+      setInputValue("");
+    } catch (err: any) {
+      setError(err.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handle clipboard paste
@@ -111,6 +155,11 @@ const URLshortInput = () => {
           </div>
         )}
       </div>
+      {error && (
+        <p className="text-red-400 text-sm mt-2" role="alert">
+          {error}
+        </p>
+      )}
       <button
         className="w-[11.35rem] h-[2.6rem] 
         rounded-[1.3rem]
@@ -119,20 +168,25 @@ const URLshortInput = () => {
         hover:opacity-90 transition-opacity
         flex items-center justify-center gap-2
         relative z-[2]"
-        onClick={() => {
-          // Handle the link shortening logic here
-          console.log("Shorten link clicked with URL:", inputValue);
-          
-          // You can call your API to shorten the URL here
-          setInputValue(""); // Clear input after clicking4
-          setCopyStatus("Link shortened!"); // Show feedback message
-          setTimeout(() => setCopyStatus(""), 2000); // Clear message after 2 seconds
-        }
-        }
+        onClick={handleShorten}
+        disabled={loading}
       >
-        Shorten my link
+        {loading ? "Creating..." : "Shorten my link"}
         <Image src={arrow} alt="arrow" className="w-[20px] h-[20px]" />
       </button>
+
+      {createdLink && (
+        <LinkReadyModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onCreateNew={() => {
+            setModalOpen(false);
+            setCreatedLink(null);
+          }}
+          shortUrl={createdLink.shortUrl}
+          qrCode={createdLink.qrCode || ""}
+        />
+      )}
     </div>
   );
 };

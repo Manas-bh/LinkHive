@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next"
+import { Providers } from "@/components/Providers";
 
 const siteTitle = "LinkHive";
 const siteDescription = "Build and share beautiful link pages with LinkHive.";
@@ -43,8 +44,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
-      <Analytics />
+      <body className="antialiased">
+        <Providers>
+          {children}
+          <Analytics />
+        </Providers>
+      </body>
     </html>
   );
 }
