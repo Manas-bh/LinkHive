@@ -1,9 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import Url from '@/model/urlModel';
 import Campaign from '@/model/campaignModel';
 import User from '@/model/userModel';
 import dbConnect from '@/lib/dbConnect';
 import { auth } from '@/auth';
+
+function sanitizeForCsv(value: unknown): string {
+    const raw = String(value ?? '');
+    if (/^[=+\-@]/.test(raw)) {
+        return `'${raw}`;
+    }
+
+    return raw;
+}
+
+function escapeCsvField(value: unknown): string {
+    return `"${sanitizeForCsv(value).replace(/"/g, '""')}"`;
+}
+
+function toIsoDate(value: unknown): string {
+    if (!value) {
+        return '';
+    }
+
+    const date = new Date(String(value));
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    return date.toISOString();
+}
 
 /**
  * GET /api/analytics/export - Export analytics to CSV
@@ -43,21 +70,38 @@ export async function GET(request: NextRequest) {
         let filename = 'analytics.csv';
 
         if (urlId) {
+            if (!mongoose.Types.ObjectId.isValid(urlId)) {
+                return NextResponse.json(
+                    { success: false, error: 'Invalid URL ID' },
+                    { status: 400 }
+                );
+            }
+
             const url = await Url.findById(urlId);
             if (!url) {
                 return NextResponse.json({ success: false, error: 'URL not found' }, { status: 404 });
             }
-            if (url.userId.toString() !== (user as any)._id.toString()) {
+
+            if (!url.userId || String(url.userId) !== String(user._id)) {
                 return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
             }
+
             data = url.clickDetails;
             filename = `analytics-${url.customAlias || url.urlCode}.csv`;
         } else if (campaignId) {
+            if (!mongoose.Types.ObjectId.isValid(campaignId)) {
+                return NextResponse.json(
+                    { success: false, error: 'Invalid campaign ID' },
+                    { status: 400 }
+                );
+            }
+
             const campaign = await Campaign.findById(campaignId);
             if (!campaign) {
                 return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
             }
-            if (campaign.userId.toString() !== (user as any)._id.toString()) {
+
+            if (String(campaign.userId) !== String(user._id)) {
                 return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
             }
 
@@ -90,7 +134,7 @@ export async function GET(request: NextRequest) {
         ].join(',') + '\n';
 
         const csvRows = data.map((click: any) => {
-            const date = new Date(click.timestamp).toISOString();
+            const date = toIsoDate(click.timestamp);
             const ip = click.ip || '';
             const country = click.country || '';
             const city = click.city || '';
@@ -102,19 +146,17 @@ export async function GET(request: NextRequest) {
             const shortUrl = click.shortUrl || '';
 
             // Escape fields that might contain commas
-            const escape = (field: string) => `"${field.replace(/"/g, '""')}"`;
-
             return [
                 date,
-                escape(ip),
-                escape(country),
-                escape(city),
-                escape(device),
-                escape(browser),
-                escape(os),
-                escape(referer),
-                escape(influencerId),
-                escape(shortUrl)
+                escapeCsvField(ip),
+                escapeCsvField(country),
+                escapeCsvField(city),
+                escapeCsvField(device),
+                escapeCsvField(browser),
+                escapeCsvField(os),
+                escapeCsvField(referer),
+                escapeCsvField(influencerId),
+                escapeCsvField(shortUrl)
             ].join(',');
         }).join('\n');
 

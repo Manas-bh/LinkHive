@@ -19,6 +19,7 @@ export default function AdminSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [accessDenied, setAccessDenied] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [bulkUploadText, setBulkUploadText] = useState("");
 
@@ -29,16 +30,21 @@ export default function AdminSettingsPage() {
 
       if (data.success) {
         setSettings(data.data);
+        setError("");
+        setAccessDenied(false);
       } else {
         if (response.status === 403) {
           setError("Access Denied: You do not have admin privileges.");
+          setAccessDenied(true);
           setTimeout(() => router.push("/dashboard"), 3000);
         } else {
+          setAccessDenied(false);
           setError(data.error || "Failed to fetch settings");
         }
       }
     } catch (error) {
       console.error("Failed to fetch settings:", error);
+      setAccessDenied(false);
       setError("Failed to connect to server");
     } finally {
       setLoading(false);
@@ -136,7 +142,7 @@ export default function AdminSettingsPage() {
     );
   }
 
-  if (error && !settings.allowRegistration) {
+  if (accessDenied) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950">
         <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-8 text-center max-w-md">
@@ -173,7 +179,11 @@ export default function AdminSettingsPage() {
                   className="bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
                 />
               </div>
-              <button className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+              <button
+                type="button"
+                aria-label="Notifications"
+                className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+              >
                 <Bell className="w-5 h-5 text-gray-400" />
               </button>
             </div>

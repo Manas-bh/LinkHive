@@ -102,7 +102,14 @@ export default function CampaignAnalyticsPage() {
             </div>
           </div>
 
-          <Button className="bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700">
+          <Button
+            className="bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700"
+            onClick={() => {
+              if (params?.id) {
+                window.location.href = `/api/analytics/export?campaignId=${params.id}`;
+              }
+            }}
+          >
             <Download className="w-4 h-4 mr-2" />
             Export Report
           </Button>

@@ -123,7 +123,11 @@ export default function DashboardPage() {
                   className="bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
                 />
               </div>
-              <button className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+              <button
+                type="button"
+                aria-label="Notifications"
+                className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+              >
                 <Bell className="w-5 h-5 text-gray-400" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
@@ -239,6 +243,8 @@ export default function DashboardPage() {
                         </a>
                         <button
                           onClick={() => copyToClipboard(link.shortUrl)}
+                          type="button"
+                          aria-label="Copy short URL"
                           className="p-1 hover:bg-gray-700 rounded"
                         >
                           <Copy className="w-4 h-4 text-gray-500" />

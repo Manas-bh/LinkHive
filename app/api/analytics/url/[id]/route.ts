@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import Url from "@/model/urlModel";
 import User from "@/model/userModel";
 import dbConnect from "@/lib/dbConnect";
@@ -17,7 +18,7 @@ import {
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     await dbConnect();
@@ -38,7 +39,13 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const { id } = await context.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid URL ID" },
+        { status: 400 }
+      );
+    }
     const url = await Url.findById(id);
 
     if (!url) {
@@ -49,7 +56,7 @@ export async function GET(
     }
 
     // Verify ownership
-    if (url.userId && url.userId.toString() !== (user._id as any).toString()) {
+    if (!url.userId || url.userId.toString() !== String(user._id)) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 403 }
@@ -58,7 +65,10 @@ export async function GET(
 
     // Get query parameters
     const searchParams = request.nextUrl.searchParams;
-    const days = parseInt(searchParams.get("days") || "30");
+    const daysInput = Number(searchParams.get("days") ?? "30");
+    const days = Number.isFinite(daysInput)
+      ? Math.min(Math.max(Math.floor(daysInput), 1), 365)
+      : 30;
 
     // Aggregate analytics
     const clicksByDay = aggregateClicksByDay(url.clickDetails, days);

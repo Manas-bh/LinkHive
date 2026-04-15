@@ -37,9 +37,21 @@ const faqs = [
 
 export default function HelpPage() {
     const [openIndex, setOpenIndex] = useState<number | null>(null);
+    const [copyLabel, setCopyLabel] = useState('Copy');
 
     const toggleFAQ = (index: number) => {
         setOpenIndex(openIndex === index ? null : index);
+    };
+
+    const handleCopyEmail = async () => {
+        try {
+            await navigator.clipboard.writeText('contact@linkhive.in');
+            setCopyLabel('Copied!');
+        } catch {
+            setCopyLabel('Failed');
+        } finally {
+            setTimeout(() => setCopyLabel('Copy'), 1500);
+        }
     };
 
     return (
@@ -67,7 +79,11 @@ export default function HelpPage() {
                                     className="bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
                                 />
                             </div>
-                            <button className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+                            <button
+                                type="button"
+                                aria-label="Notifications"
+                                className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+                            >
                                 <Bell className="w-5 h-5 text-gray-400" />
                                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
                             </button>
@@ -137,8 +153,11 @@ export default function HelpPage() {
                                 <div className="bg-gray-800 border border-gray-700 rounded-lg px-6 py-3">
                                     <span className="text-blue-400 font-medium">contact@linkhive.in</span>
                                 </div>
-                                <button className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 hover:bg-gray-700 transition-colors">
-                                    <span className="text-gray-300 text-sm">📋 Copy</span>
+                                <button
+                                    onClick={handleCopyEmail}
+                                    className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 hover:bg-gray-700 transition-colors"
+                                >
+                                    <span className="text-gray-300 text-sm">📋 {copyLabel}</span>
                                 </button>
                             </div>
                         </div>

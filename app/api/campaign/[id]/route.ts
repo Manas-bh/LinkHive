@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import Campaign from '@/model/campaignModel';
 import Url from '@/model/urlModel';
 import User from '@/model/userModel';
 import dbConnect from '@/lib/dbConnect';
 import { auth } from '@/auth';
 
+function isValidCampaignStatus(status: unknown): status is 'active' | 'paused' | 'completed' {
+    return status === 'active' || status === 'paused' || status === 'completed';
+}
+
 /**
  * GET /api/campaign/[id] - Get campaign details with influencer metrics
  */
 export async function GET(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
@@ -32,6 +37,13 @@ export async function GET(
         }
 
         const { id } = await params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid campaign ID' },
+                { status: 400 }
+            );
+        }
+
         const campaign = await Campaign.findById(id);
 
         if (!campaign) {
@@ -145,6 +157,13 @@ export async function PUT(
         }
 
         const { id } = await params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid campaign ID' },
+                { status: 400 }
+            );
+        }
+
         const campaign = await Campaign.findById(id);
 
         if (!campaign) {
@@ -165,11 +184,29 @@ export async function PUT(
         const body = await request.json();
         const { name, description, status, destinationUrl } = body;
 
+        if (status !== undefined && !isValidCampaignStatus(status)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid campaign status' },
+                { status: 400 }
+            );
+        }
+
+        if (destinationUrl !== undefined) {
+            try {
+                new URL(destinationUrl);
+            } catch {
+                return NextResponse.json(
+                    { success: false, error: 'Invalid destination URL' },
+                    { status: 400 }
+                );
+            }
+        }
+
         // Update fields
         if (name) campaign.name = name;
         if (description !== undefined) campaign.description = description;
-        if (status) campaign.status = status;
-        if (destinationUrl) campaign.destinationUrl = destinationUrl;
+        if (status !== undefined) campaign.status = status;
+        if (destinationUrl !== undefined) campaign.destinationUrl = destinationUrl;
 
         await campaign.save();
 
@@ -196,7 +233,7 @@ export async function PUT(
  * DELETE /api/campaign/[id] - Delete campaign and associated URLs
  */
 export async function DELETE(
-    request: NextRequest,
+    _request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
     try {
@@ -219,6 +256,13 @@ export async function DELETE(
         }
 
         const { id } = await params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid campaign ID' },
+                { status: 400 }
+            );
+        }
+
         const campaign = await Campaign.findById(id);
 
         if (!campaign) {
@@ -237,16 +281,30 @@ export async function DELETE(
         }
 
         // Delete all URLs associated with this campaign
+        const campaignUrls = await Url.find({ campaignId: id }).select('_id');
+        const campaignUrlIds = campaignUrls.map((url) => String(url._id));
         await Url.deleteMany({ campaignId: id });
 
         // Delete campaign
         await Campaign.findByIdAndDelete(id);
 
-        // Remove from user's campaigns array
+        // Remove campaign and URLs from user references
+        let userChanged = false;
         if (user.campaigns) {
             user.campaigns = user.campaigns.filter(
                 (cid: any) => cid.toString() !== id
             );
+            userChanged = true;
+        }
+
+        if (user.urls && campaignUrlIds.length) {
+            user.urls = user.urls.filter(
+                (uid: any) => !campaignUrlIds.includes(uid.toString())
+            );
+            userChanged = true;
+        }
+
+        if (userChanged) {
             await user.save();
         }
 

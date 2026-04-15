@@ -6,6 +6,10 @@ import Url from '@/model/urlModel';
 import { nanoid } from 'nanoid';
 import { generateQRCode } from '@/lib/qrcode';
 
+function sanitizeAlias(alias: string) {
+    return alias.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+}
+
 export async function POST(request: NextRequest) {
     try {
         const session = await auth();
@@ -54,23 +58,39 @@ export async function POST(request: NextRequest) {
                     continue;
                 }
 
+                try {
+                    new URL(urlData.originalUrl);
+                } catch {
+                    results.failed.push({
+                        url: urlData,
+                        error: 'Invalid URL format'
+                    });
+                    continue;
+                }
+
+                const normalizedAlias = urlData.customAlias
+                    ? sanitizeAlias(urlData.customAlias)
+                    : undefined;
+
                 // Check if custom alias already exists
-                if (urlData.customAlias) {
-                    const existing = await Url.findOne({ customAlias: urlData.customAlias });
+                if (normalizedAlias) {
+                    const existing = await Url.findOne({
+                        $or: [{ customAlias: normalizedAlias }, { urlCode: normalizedAlias }],
+                    });
                     if (existing) {
                         results.failed.push({
                             url: urlData,
-                            error: `Custom alias '${urlData.customAlias}' already exists`
+                            error: `Custom alias '${normalizedAlias}' already exists`
                         });
                         continue;
                     }
                 }
 
-                const urlCode = urlData.customAlias || nanoid(7);
+                const urlCode = normalizedAlias || nanoid(7);
                 const newUrl = new Url({
                     originalUrl: urlData.originalUrl,
                     urlCode,
-                    customAlias: urlData.customAlias,
+                    customAlias: normalizedAlias,
                     userId: (user as any)._id,
                     clickDetails: [],
                     status: 'active',

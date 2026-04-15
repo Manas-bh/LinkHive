@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import { auth } from '@/auth';
 import dbConnect from '@/lib/dbConnect';
 import User from '@/model/userModel';
@@ -9,6 +10,13 @@ export async function PUT(
 ) {
     try {
         const { id } = await params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid user ID' },
+                { status: 400 }
+            );
+        }
+
         const session = await auth();
         if (!session?.user?.email) {
             return NextResponse.json(
@@ -30,6 +38,20 @@ export async function PUT(
 
         const body = await request.json();
         const { role, isActive } = body;
+
+        if (role !== undefined && role !== 'user' && role !== 'admin') {
+            return NextResponse.json(
+                { success: false, error: 'Invalid role' },
+                { status: 400 }
+            );
+        }
+
+        if (isActive !== undefined && typeof isActive !== 'boolean') {
+            return NextResponse.json(
+                { success: false, error: 'Invalid isActive value' },
+                { status: 400 }
+            );
+        }
 
         const targetUser = await User.findById(id);
         if (!targetUser) {

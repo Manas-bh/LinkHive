@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import mongoose from 'mongoose';
 import Campaign from '@/model/campaignModel';
 import Url from '@/model/urlModel';
 import User from '@/model/userModel';
@@ -6,6 +7,14 @@ import dbConnect from '@/lib/dbConnect';
 import { auth } from '@/auth';
 import { nanoid } from 'nanoid';
 import { generateQRCode } from '@/lib/qrcode';
+
+function isValidSlugSegment(value: string) {
+    return /^[a-z0-9-]+$/.test(value);
+}
+
+function normalizeSlugSegment(value: string) {
+    return value.trim().toLowerCase();
+}
 
 /**
  * POST /api/campaign/[id]/link - Generate a new influencer link for a campaign
@@ -18,6 +27,13 @@ export async function POST(
         await dbConnect();
 
         const { id } = await params;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return NextResponse.json(
+                { success: false, error: 'Invalid campaign ID' },
+                { status: 400 }
+            );
+        }
+
         const session = await auth();
         if (!session?.user?.email) {
             return NextResponse.json(
@@ -60,9 +76,34 @@ export async function POST(
             );
         }
 
+        const normalizedInfluencerId = normalizeSlugSegment(String(influencerId));
+        if (!isValidSlugSegment(normalizedInfluencerId)) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'Influencer ID can only contain letters, numbers, and hyphens'
+                },
+                { status: 400 }
+            );
+        }
+
+        const normalizedCustomSlug = customSlug
+            ? normalizeSlugSegment(String(customSlug))
+            : undefined;
+
+        if (normalizedCustomSlug && !isValidSlugSegment(normalizedCustomSlug)) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'Custom slug can only contain letters, numbers, and hyphens'
+                },
+                { status: 400 }
+            );
+        }
+
         // Check if influencer ID already exists in this campaign
         const existingInfluencer = campaign.influencers.find(
-            (inf: any) => inf.influencerId === influencerId
+            (inf: any) => inf.influencerId === normalizedInfluencerId
         );
 
         if (existingInfluencer) {
@@ -73,15 +114,25 @@ export async function POST(
         }
 
         // Generate URL
-        const influencerSlug = customSlug || nanoid(7);
-        const urlCode = `i-${influencerId}-${influencerSlug}`;
+        const influencerSlug = normalizedCustomSlug || nanoid(7);
+        const urlCode = `i-${normalizedInfluencerId}-${influencerSlug}`;
+
+        const existingCode = await Url.findOne({
+            $or: [{ urlCode }, { customAlias: urlCode }],
+        }).select('_id');
+        if (existingCode) {
+            return NextResponse.json(
+                { success: false, error: 'A generated campaign link already exists with this slug' },
+                { status: 409 }
+            );
+        }
 
         const url = new Url({
             originalUrl: campaign.destinationUrl,
             urlCode,
             userId: user._id,
             campaignId: campaign._id,
-            influencerId,
+            influencerId: normalizedInfluencerId,
             clickDetails: [],
             status: 'active',
         });
@@ -99,9 +150,9 @@ export async function POST(
 
         // Add to campaign
         campaign.influencers.push({
-            influencerId,
-            name: name || influencerId,
-            customSlug,
+            influencerId: normalizedInfluencerId,
+            name: String(name || normalizedInfluencerId).trim(),
+            customSlug: normalizedCustomSlug,
             urlId: url._id,
         });
 
@@ -118,8 +169,8 @@ export async function POST(
             {
                 success: true,
                 data: {
-                    influencerId,
-                    name: name || influencerId,
+                    influencerId: normalizedInfluencerId,
+                    name: String(name || normalizedInfluencerId).trim(),
                     shortUrl: url.shortUrl,
                     qrCode: url.qrCode,
                     urlId: url._id,

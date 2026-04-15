@@ -37,20 +37,12 @@ export async function resolveLinkAndTrack(code: string, request: NextRequest) {
 
   const { device, browser, os } = parseUserAgent(userAgent);
   const uniqueId = generateVisitorId(ip, userAgent);
-  const isUniqueVisitor = !url.clickDetails.some(
-    (click: any) => click.uniqueId === uniqueId
-  );
-
-  url.clicks = (url.clicks || 0) + 1;
-  if (isUniqueVisitor) {
-    url.uniqueVisitors = (url.uniqueVisitors || 0) + 1;
-  }
 
   let geoData: Awaited<ReturnType<typeof getGeolocation>>;
   try {
     geoData = await Promise.race<Awaited<ReturnType<typeof getGeolocation>>>([
       getGeolocation(ip),
-      new Promise<never>((_, reject) =>
+      new Promise<Awaited<ReturnType<typeof getGeolocation>>>((_, reject) =>
         setTimeout(() => reject(new Error("Geolocation timeout")), 2000)
       ),
     ]);
@@ -64,7 +56,7 @@ export async function resolveLinkAndTrack(code: string, request: NextRequest) {
     };
   }
 
-  url.clickDetails.push({
+  const clickPayload = {
     ip,
     timestamp: new Date(),
     userAgent,
@@ -78,18 +70,49 @@ export async function resolveLinkAndTrack(code: string, request: NextRequest) {
     browser,
     os,
     uniqueId,
-  });
+  };
 
-  if (geoData.latitude && geoData.longitude) {
-    url.location = {
-      type: "Point",
-      coordinates: [geoData.longitude, geoData.latitude],
-    } as any;
+  const locationPayload =
+    geoData.latitude && geoData.longitude
+      ? {
+          type: "Point",
+          coordinates: [geoData.longitude, geoData.latitude],
+        }
+      : null;
+
+  try {
+    const updatePipeline: any[] = [
+      {
+        $set: {
+          _hasUniqueId: {
+            $in: [uniqueId, { $ifNull: ["$clickDetails.uniqueId", []] }],
+          },
+        },
+      },
+      {
+        $set: {
+          clicks: { $add: [{ $ifNull: ["$clicks", 0] }, 1] },
+          uniqueVisitors: {
+            $add: [
+              { $ifNull: ["$uniqueVisitors", 0] },
+              { $cond: ["$_hasUniqueId", 0, 1] },
+            ],
+          },
+          clickDetails: {
+            $concatArrays: [{ $ifNull: ["$clickDetails", []] }, [clickPayload]],
+          },
+          ...(locationPayload ? { location: locationPayload } : {}),
+        },
+      },
+      {
+        $unset: "_hasUniqueId",
+      },
+    ];
+
+    await Url.updateOne({ _id: url._id }, updatePipeline);
+  } catch (error) {
+    console.error("Error saving analytics:", error);
   }
-
-  url
-    .save()
-    .catch((error: Error) => console.error("Error saving analytics:", error));
 
   return url.originalUrl;
 }

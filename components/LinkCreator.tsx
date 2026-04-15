@@ -118,6 +118,11 @@ export default function LinkCreator({ onLinkCreated }: LinkCreatorProps) {
             <Button
               type="button"
               variant="outline"
+              onClick={() => {
+                setUrl("");
+                setCustomAlias("");
+                setError("");
+              }}
               className="flex-1 h-12 text-gray-300 border-gray-700 hover:bg-gray-800"
             >
               Cancel

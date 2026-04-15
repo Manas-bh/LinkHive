@@ -20,7 +20,6 @@ export default function LinkEditModal({
 }: LinkEditModalProps) {
   const [originalUrl, setOriginalUrl] = useState("");
   const [customAlias, setCustomAlias] = useState("");
-  const [password, setPassword] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [status, setStatus] = useState("active");
   const [loading, setLoading] = useState(false);
@@ -30,7 +29,6 @@ export default function LinkEditModal({
     if (urlData) {
       setOriginalUrl(urlData.originalUrl || "");
       setCustomAlias(urlData.customAlias || "");
-      // Password is intentionally not pre-filled for security
 
       if (urlData.expiresAt) {
         const date = new Date(urlData.expiresAt);
@@ -58,7 +56,6 @@ export default function LinkEditModal({
         body: JSON.stringify({
           originalUrl,
           customAlias,
-          password: password || undefined,
           expiresAt: expiresAt || null,
         }),
       });
@@ -162,20 +159,6 @@ export default function LinkEditModal({
               value={customAlias}
               onChange={(e) => setCustomAlias(e.target.value)}
               placeholder="my-custom-link"
-              className="h-11 bg-gray-800 border-gray-700 text-white placeholder-gray-500"
-            />
-          </div>
-
-          {/* Password Protection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Password Protection (Optional)
-            </label>
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Set a new password to protect this link"
               className="h-11 bg-gray-800 border-gray-700 text-white placeholder-gray-500"
             />
           </div>

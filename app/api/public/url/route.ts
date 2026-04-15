@@ -10,6 +10,23 @@ interface CreatePublicUrlRequest {
   expiresAt?: string;
 }
 
+function normalizeSlugSegment(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isValidSlugSegment(value: string) {
+  return /^[a-z0-9-]+$/.test(value);
+}
+
+function isDuplicateKeyError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: number }).code === 11000
+  );
+}
+
 export async function POST(request: NextRequest) {
   try {
     await dbConnect();
@@ -34,8 +51,8 @@ export async function POST(request: NextRequest) {
 
     let alias: string | undefined;
     if (customAlias) {
-      alias = sanitizeAlias(customAlias);
-      if (!alias) {
+      const normalizedAlias = normalizeSlugSegment(customAlias);
+      if (!isValidSlugSegment(normalizedAlias)) {
         return NextResponse.json(
           {
             success: false,
@@ -46,7 +63,11 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const existing = await Url.findOne({ customAlias: alias });
+      alias = normalizedAlias;
+
+      const existing = await Url.findOne({
+        $or: [{ customAlias: alias }, { urlCode: alias }],
+      });
       if (existing) {
         return NextResponse.json(
           { success: false, error: "Custom alias already in use" },
@@ -90,14 +111,17 @@ export async function POST(request: NextRequest) {
     );
   } catch (error: any) {
     console.error("Public URL error:", error);
+
+    if (isDuplicateKeyError(error)) {
+      return NextResponse.json(
+        { success: false, error: "Custom alias already in use" },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { success: false, error: error.message || "Failed to create link" },
       { status: 500 }
     );
   }
-}
-
-function sanitizeAlias(alias: string) {
-  const sanitized = alias.toLowerCase().replace(/[^a-z0-9-]/g, "");
-  return sanitized;
 }

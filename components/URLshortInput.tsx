@@ -142,13 +142,15 @@ const URLshortInput = () => {
             focus:outline-none
             flex items-center"
         />
-        <div
+        <button
+          type="button"
           className="absolute right-6 lg:right-4 top-1/2 -translate-y-1/2 cursor-pointer"
           onClick={handlePaste}
           title="Paste from clipboard"
+          aria-label="Paste from clipboard"
         >
           <Image src={clipboard} alt="clipboard" className="h-[30px]" />
-        </div>
+        </button>
         {copyStatus && (
           <div className="absolute -bottom-6 right-6 text-sm text-green-400">
             {copyStatus}

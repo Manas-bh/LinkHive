@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import Url, { IUrl } from "@/model/urlModel";
 import User from "@/model/userModel";
@@ -6,6 +7,14 @@ import Campaign from "@/model/campaignModel";
 import dbConnect from "@/lib/dbConnect";
 import { auth } from "@/auth";
 import { generateQRCode } from "@/lib/qrcode";
+
+function normalizeSlugSegment(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function isValidSlugSegment(value: string) {
+  return /^[a-z0-9-]+$/.test(value);
+}
 
 interface ApiResponse {
   success: boolean;
@@ -20,6 +29,15 @@ interface CreateUrlRequest {
   campaignId?: string;
   influencerId?: string;
   expiresAt?: string;
+}
+
+function isDuplicateKeyError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: number }).code === 11000
+  );
 }
 
 export async function POST(
@@ -84,10 +102,12 @@ export async function POST(
     }
 
     // Validate custom alias if provided
-    if (customAlias) {
-      // Sanitize: only alphanumeric and hyphens
-      const sanitized = customAlias.toLowerCase().replace(/[^a-z0-9-]/g, "");
-      if (sanitized !== customAlias.toLowerCase()) {
+    const normalizedAlias = customAlias
+      ? normalizeSlugSegment(customAlias)
+      : undefined;
+
+    if (normalizedAlias) {
+      if (!isValidSlugSegment(normalizedAlias)) {
         return NextResponse.json(
           {
             success: false,
@@ -100,7 +120,9 @@ export async function POST(
       }
 
       // Check if alias already exists
-      const existing = await Url.findOne({ customAlias: sanitized });
+      const existing = await Url.findOne({
+        $or: [{ customAlias: normalizedAlias }, { urlCode: normalizedAlias }],
+      }).select("_id");
       if (existing) {
         return NextResponse.json(
           {
@@ -115,7 +137,22 @@ export async function POST(
 
     // Validate campaign if provided
     let campaign = null;
+    const normalizedInfluencerId = influencerId
+      ? normalizeSlugSegment(influencerId)
+      : undefined;
+
     if (campaignId) {
+      if (!mongoose.Types.ObjectId.isValid(campaignId)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Campaign not found",
+            error: "Invalid campaign ID",
+          },
+          { status: 400 }
+        );
+      }
+
       campaign = await Campaign.findById(campaignId);
       if (!campaign) {
         return NextResponse.json(
@@ -141,7 +178,7 @@ export async function POST(
       }
 
       // Require influencer ID for campaign links
-      if (!influencerId) {
+      if (!normalizedInfluencerId) {
         return NextResponse.json(
           {
             success: false,
@@ -151,19 +188,61 @@ export async function POST(
           { status: 400 }
         );
       }
+
+      if (!isValidSlugSegment(normalizedInfluencerId)) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Invalid influencer ID",
+            error:
+              "Influencer ID can only contain letters, numbers, and hyphens",
+          },
+          { status: 400 }
+        );
+      }
+
+      const existingInfluencer = campaign.influencers.find(
+        (inf: any) =>
+          normalizeSlugSegment(String(inf.influencerId)) === normalizedInfluencerId
+      );
+
+      if (existingInfluencer?.urlId) {
+        return NextResponse.json(
+          {
+            success: false,
+            message: "Influencer ID already exists",
+            error: "A link for this influencer already exists in this campaign",
+          },
+          { status: 409 }
+        );
+      }
     }
 
     // Generate URL code
-    const urlCode = customAlias || nanoid(7);
+    const urlCode = normalizedAlias || nanoid(7);
+
+    const existingCode = await Url.findOne({
+      $or: [{ urlCode }, { customAlias: urlCode }],
+    }).select("_id");
+    if (existingCode) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Generated URL already exists",
+          error: "Please try again",
+        },
+        { status: 409 }
+      );
+    }
 
     // Create URL document
     const link: Partial<IUrl> = {
       originalUrl: url,
       urlCode: urlCode,
-      customAlias: customAlias || undefined,
+      customAlias: normalizedAlias || undefined,
       userId: user._id as any,
       campaignId: campaignId ? (campaign!._id as any) : undefined,
-      influencerId: influencerId || undefined,
+      influencerId: normalizedInfluencerId || undefined,
       clickDetails: [],
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
       status: "active",
@@ -190,9 +269,10 @@ export async function POST(
     await user.save();
 
     // If campaign link, add to campaign's influencers
-    if (campaign && influencerId) {
+    if (campaign && normalizedInfluencerId) {
       const influencerIndex = campaign.influencers.findIndex(
-        (inf: any) => inf.influencerId === influencerId
+        (inf: any) =>
+          normalizeSlugSegment(String(inf.influencerId)) === normalizedInfluencerId
       );
 
       if (influencerIndex >= 0) {
@@ -201,8 +281,8 @@ export async function POST(
       } else {
         // Add new influencer
         campaign.influencers.push({
-          influencerId,
-          name: influencerId, // Can be updated later
+          influencerId: normalizedInfluencerId,
+          name: normalizedInfluencerId,
           urlId: newLink._id,
         });
       }
@@ -221,6 +301,17 @@ export async function POST(
   } catch (error) {
     const err = error as Error;
     console.error("URL creation error:", err);
+
+    if (isDuplicateKeyError(error)) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Custom alias already taken",
+          error: "This custom alias is already in use",
+        },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json(
       {

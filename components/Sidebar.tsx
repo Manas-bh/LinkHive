@@ -69,7 +69,11 @@ export default function Sidebar() {
                             {session?.user?.email}
                         </p>
                     </div>
-                    <button className="text-gray-400 hover:text-white">
+                    <button
+                        type="button"
+                        aria-label="Profile settings"
+                        className="text-gray-400 hover:text-white"
+                    >
                         <Settings className="w-4 h-4" />
                     </button>
                 </div>
@@ -118,7 +122,11 @@ export default function Sidebar() {
                         <Sparkles className="w-4 h-4" />
                         <span className="text-sm font-medium">Advance</span>
                     </button>
-                    <button className="p-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-700">
+                    <button
+                        type="button"
+                        aria-label="Open help"
+                        className="p-2 bg-gray-800 text-gray-400 rounded-lg hover:bg-gray-700"
+                    >
                         <HelpCircle className="w-4 h-4" />
                     </button>
                 </div>

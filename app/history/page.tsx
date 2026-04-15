@@ -16,6 +16,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import LinkEditModal from "@/components/LinkEditModal";
 import Image from "next/image";
+import Link from "next/link";
 
 export default function HistoryPage() {
   const [links, setLinks] = useState<any[]>([]);
@@ -45,7 +46,7 @@ export default function HistoryPage() {
         return "bg-green-500/10 text-green-400 border border-green-500/20";
       case "paused":
         return "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20";
-      case "inactive":
+      case "disabled":
         return "bg-red-500/10 text-red-400 border border-red-500/20";
       default:
         return "bg-gray-500/10 text-gray-400 border border-gray-500/20";
@@ -61,6 +62,13 @@ export default function HistoryPage() {
     ];
     return icons[index % icons.length];
   };
+
+  const filteredLinks = links.filter((link) => {
+    if (filter === "all") {
+      return true;
+    }
+    return link.status === filter;
+  });
 
   return (
     <div className="flex h-screen bg-gray-950">
@@ -87,7 +95,11 @@ export default function HistoryPage() {
                   className="bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
                 />
               </div>
-              <button className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+              <button
+                type="button"
+                aria-label="Notifications"
+                className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+              >
                 <Bell className="w-5 h-5 text-gray-400" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
@@ -116,7 +128,7 @@ export default function HistoryPage() {
                   >
                     <option value="active">Active</option>
                     <option value="all">All</option>
-                    <option value="inactive">Inactive</option>
+                    <option value="disabled">Disabled</option>
                   </select>
                 </div>
               </div>
@@ -138,12 +150,12 @@ export default function HistoryPage() {
 
             {/* Link Cards */}
             <div className="space-y-4">
-              {links.length === 0 ? (
+              {filteredLinks.length === 0 ? (
                 <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
                   <p className="text-gray-500">No links in history.</p>
                 </div>
               ) : (
-                links.map((link, index) => {
+                filteredLinks.map((link, index) => {
                   const icon = getLinkIcon(index);
 
                   return (
@@ -180,12 +192,15 @@ export default function HistoryPage() {
 
                           {/* Metadata Pills */}
                           <div className="flex flex-wrap items-center gap-2">
-                            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors">
+                            <Link
+                              href={`/analytics/${link._id}`}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+                            >
                               <Eye className="w-4 h-4 text-blue-400" />
                               <span className="text-sm text-gray-300">
                                 Analytics
                               </span>
-                            </button>
+                            </Link>
 
                             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg">
                               <Calendar className="w-4 h-4 text-gray-400" />
@@ -262,7 +277,7 @@ export default function HistoryPage() {
             </div>
 
             {/* End Message */}
-            {links.length > 0 && (
+            {filteredLinks.length > 0 && (
               <div className="text-center mt-8 pb-4">
                 <p className="text-gray-500 text-sm">History ends here.</p>
               </div>

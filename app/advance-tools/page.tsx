@@ -16,6 +16,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import CampaignCreateModal from "@/components/CampaignCreateModal";
 import Image from "next/image";
+import Link from "next/link";
 
 export default function AdvanceToolsPage() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
@@ -45,7 +46,7 @@ export default function AdvanceToolsPage() {
         return "bg-green-500/10 text-green-400";
       case "paused":
         return "bg-yellow-500/10 text-yellow-400";
-      case "disabled":
+      case "completed":
         return "bg-red-500/10 text-red-400";
       default:
         return "bg-gray-500/10 text-gray-400";
@@ -61,6 +62,13 @@ export default function AdvanceToolsPage() {
     ];
     return icons[index % icons.length];
   };
+
+  const filteredCampaigns = campaigns.filter((campaign) => {
+    if (filter === "all") {
+      return true;
+    }
+    return campaign.status === filter;
+  });
 
   return (
     <div className="flex h-screen bg-gray-950">
@@ -87,7 +95,11 @@ export default function AdvanceToolsPage() {
                   className="bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-64"
                 />
               </div>
-              <button className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700">
+              <button
+                type="button"
+                aria-label="Notifications"
+                className="relative p-2 bg-gray-800 rounded-lg hover:bg-gray-700"
+              >
                 <Bell className="w-5 h-5 text-gray-400" />
                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
               </button>
@@ -131,7 +143,7 @@ export default function AdvanceToolsPage() {
                     <option value="active">Active</option>
                     <option value="all">All</option>
                     <option value="paused">Paused</option>
-                    <option value="disabled">Disabled</option>
+                    <option value="completed">Completed</option>
                   </select>
                 </div>
               </div>
@@ -152,7 +164,7 @@ export default function AdvanceToolsPage() {
             </div>
 
             {/* Campaign Cards */}
-            {campaigns.length === 0 ? (
+            {filteredCampaigns.length === 0 ? (
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
                 <div className="text-gray-500 mb-4">
                   <svg
@@ -175,7 +187,7 @@ export default function AdvanceToolsPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {campaigns.map((campaign, index) => {
+                {filteredCampaigns.map((campaign, index) => {
                   const icon = getCampaignIcon(index);
 
                   return (
@@ -212,12 +224,15 @@ export default function AdvanceToolsPage() {
 
                           {/* Metadata */}
                           <div className="flex flex-wrap items-center gap-3 mt-3">
-                            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors">
+                            <Link
+                              href={`/analytics/campaign/${campaign._id}`}
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+                            >
                               <Eye className="w-4 h-4 text-blue-400" />
                               <span className="text-sm text-gray-300">
                                 Analytics
                               </span>
-                            </button>
+                            </Link>
 
                             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-800 rounded-lg">
                               <Calendar className="w-4 h-4 text-gray-400" />
@@ -295,7 +310,7 @@ export default function AdvanceToolsPage() {
             )}
 
             {/* End Message */}
-            {campaigns.length > 0 && (
+            {filteredCampaigns.length > 0 && (
               <div className="text-center mt-8 pb-4">
                 <p className="text-gray-500 text-sm">History ends here.</p>
               </div>

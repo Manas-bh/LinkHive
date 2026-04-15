@@ -7,6 +7,14 @@ import { auth } from "@/auth";
 import { nanoid } from "nanoid";
 import { generateQRCode } from "@/lib/qrcode";
 
+function isValidSlugSegment(value: string) {
+  return /^[a-z0-9-]+$/.test(value);
+}
+
+function normalizeSlugSegment(value: string) {
+  return value.trim().toLowerCase();
+}
+
 /**
  * POST /api/campaign - Create a new campaign
  */
@@ -53,6 +61,66 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const normalizedInfluencers: Array<{
+      influencerId: string;
+      name: string;
+      customSlug?: string;
+    }> = [];
+
+    if (Array.isArray(influencers)) {
+      const seenInfluencerIds = new Set<string>();
+
+      for (const item of influencers) {
+        if (!item?.influencerId) {
+          continue;
+        }
+
+        const influencerId = normalizeSlugSegment(String(item.influencerId));
+        if (!isValidSlugSegment(influencerId)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                "Influencer ID can only contain letters, numbers, and hyphens",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (seenInfluencerIds.has(influencerId)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Duplicate influencer ID in payload: ${influencerId}`,
+            },
+            { status: 400 }
+          );
+        }
+        seenInfluencerIds.add(influencerId);
+
+        let normalizedCustomSlug: string | undefined;
+        if (item.customSlug) {
+          normalizedCustomSlug = normalizeSlugSegment(String(item.customSlug));
+          if (!isValidSlugSegment(normalizedCustomSlug)) {
+            return NextResponse.json(
+              {
+                success: false,
+                error:
+                  "Custom slug can only contain letters, numbers, and hyphens",
+              },
+              { status: 400 }
+            );
+          }
+        }
+
+        normalizedInfluencers.push({
+          influencerId,
+          name: String(item.name || influencerId).trim(),
+          customSlug: normalizedCustomSlug,
+        });
+      }
+    }
+
     // Create campaign
     const campaign = new Campaign({
       name,
@@ -66,48 +134,58 @@ export async function POST(request: NextRequest) {
     await campaign.save();
 
     // Generate influencer links if provided
-    if (influencers && Array.isArray(influencers)) {
-      for (const inf of influencers) {
-        if (inf.influencerId) {
-          // Generate URL for influencer
-          const influencerSlug = inf.customSlug || nanoid(7);
-          const urlCode = `i-${inf.influencerId}-${influencerSlug}`;
+    if (normalizedInfluencers.length) {
+      for (const inf of normalizedInfluencers) {
+        const influencerSlug = inf.customSlug || nanoid(7);
+        const urlCode = `i-${inf.influencerId}-${influencerSlug}`;
 
-          const url = new Url({
-            originalUrl: destinationUrl,
-            urlCode,
-            userId: user._id,
-            campaignId: campaign._id,
-            influencerId: inf.influencerId,
-            clickDetails: [],
-            status: "active",
-          });
-
-          await url.save();
-
-          // Generate QR code
-          try {
-            const qrCode = await generateQRCode(url.shortUrl || "");
-            url.qrCode = qrCode;
-            await url.save();
-          } catch (error) {
-            console.error("QR code generation failed:", error);
-          }
-
-          // Add to campaign influencers
-          campaign.influencers.push({
-            influencerId: inf.influencerId,
-            name: inf.name || inf.influencerId,
-            customSlug: inf.customSlug,
-            urlId: url._id,
-          });
-
-          // Add to user's URLs
-          if (!user.urls) {
-            user.urls = [];
-          }
-          user.urls.push(url._id);
+        const existingCode = await Url.findOne({
+          $or: [{ urlCode }, { customAlias: urlCode }],
+        }).select("_id");
+        if (existingCode) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Generated link code conflict for influencer ${inf.influencerId}`,
+            },
+            { status: 409 }
+          );
         }
+
+        const url = new Url({
+          originalUrl: destinationUrl,
+          urlCode,
+          userId: user._id,
+          campaignId: campaign._id,
+          influencerId: inf.influencerId,
+          clickDetails: [],
+          status: "active",
+        });
+
+        await url.save();
+
+        // Generate QR code
+        try {
+          const qrCode = await generateQRCode(url.shortUrl || "");
+          url.qrCode = qrCode;
+          await url.save();
+        } catch (error) {
+          console.error("QR code generation failed:", error);
+        }
+
+        // Add to campaign influencers
+        campaign.influencers.push({
+          influencerId: inf.influencerId,
+          name: inf.name,
+          customSlug: inf.customSlug,
+          urlId: url._id,
+        });
+
+        // Add to user's URLs
+        if (!user.urls) {
+          user.urls = [];
+        }
+        user.urls.push(url._id);
       }
 
       await campaign.save();

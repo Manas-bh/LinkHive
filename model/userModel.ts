@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-interface IUser extends Document {
+export interface IUser extends Document {
   email: string;
   password?: string;
   firstName: string;
@@ -184,8 +184,7 @@ UserSchema.index({ 'oauthProviders.provider': 1, 'oauthProviders.providerId': 1 
 // Create index for subscription expiration to enable efficient querying
 UserSchema.index({ 'subscription.expiresAt': 1 });
 
-
 // Create and export the model
-const User = mongoose.model<IUser>('User', UserSchema);
+const User = mongoose.models.User || mongoose.model<IUser>('User', UserSchema);
 
 export default User;
