@@ -10,6 +10,9 @@ import { getDefaultUrlExpiryDate } from "@/lib/api/urlExpiry";
 import { normalizeHttpUrl } from "@/lib/api/urlValidation";
 import { isDuplicateKeyError } from "@/lib/api/errors";
 import type { IInfluencer } from "@/model/campaignModel";
+import { campaignCreateSchema } from "@/lib/api/schemas";
+import { getFirstZodErrorMessage } from "@/lib/api/validation";
+import { ZodError } from "zod";
 
 type PreparedInfluencer = {
   influencerId: string;
@@ -35,16 +38,8 @@ export async function POST(request: NextRequest) {
 
     const user = authResult.user;
 
-    const body = await request.json();
+    const body = campaignCreateSchema.parse(await request.json());
     const { name, description, destinationUrl, influencers } = body;
-
-    // Validate required fields
-    if (!name || !destinationUrl) {
-      return NextResponse.json(
-        { success: false, error: "Name and destination URL are required" },
-        { status: 400 }
-      );
-    }
 
     const normalizedDestinationUrl = normalizeHttpUrl(destinationUrl);
     if (!normalizedDestinationUrl) {
@@ -233,6 +228,16 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error("Campaign creation error:", error);
+
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: getFirstZodErrorMessage(error),
+        },
+        { status: 400 }
+      );
+    }
 
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(

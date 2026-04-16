@@ -6,6 +6,9 @@ import { getAuthenticatedUser } from '@/lib/api/auth';
 import { getOwnedCampaignById } from '@/lib/api/ownership';
 import { normalizeHttpUrl } from '@/lib/api/urlValidation';
 import type { IInfluencer } from '@/model/campaignModel';
+import { campaignUpdateSchema } from '@/lib/api/schemas';
+import { getFirstZodErrorMessage } from '@/lib/api/validation';
+import { ZodError } from 'zod';
 
 function mapCampaignStatusToUrlStatus(
     status: 'active' | 'paused' | 'completed'
@@ -19,10 +22,6 @@ function mapCampaignStatusToUrlStatus(
     }
 
     return 'disabled';
-}
-
-function isValidCampaignStatus(status: unknown): status is 'active' | 'paused' | 'completed' {
-    return status === 'active' || status === 'paused' || status === 'completed';
 }
 
 /**
@@ -174,15 +173,8 @@ export async function PUT(
 
         const { campaign } = ownedCampaignResult;
 
-        const body = await request.json();
+        const body = campaignUpdateSchema.parse(await request.json());
         const { name, description, status, destinationUrl } = body;
-
-        if (status !== undefined && !isValidCampaignStatus(status)) {
-            return NextResponse.json(
-                { success: false, error: 'Invalid campaign status' },
-                { status: 400 }
-            );
-        }
 
         let normalizedDestinationUrl: string | undefined;
         if (destinationUrl !== undefined) {
@@ -231,6 +223,17 @@ export async function PUT(
         );
     } catch (error) {
         console.error('Error updating campaign:', error);
+
+        if (error instanceof ZodError) {
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: getFirstZodErrorMessage(error),
+                },
+                { status: 400 }
+            );
+        }
+
         return NextResponse.json(
             {
                 success: false,

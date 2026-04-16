@@ -7,17 +7,14 @@ import { isValidSlugSegment, normalizeSlugSegment } from "@/lib/api/slug";
 import { getDefaultUrlExpiryDate, parseExpiryInput } from "@/lib/api/urlExpiry";
 import { isDuplicateKeyError } from "@/lib/api/errors";
 import { normalizeHttpUrl } from "@/lib/api/urlValidation";
-
-interface CreatePublicUrlRequest {
-  url: string;
-  customAlias?: string;
-  expiresAt?: string | null;
-}
+import { publicUrlCreateSchema } from "@/lib/api/schemas";
+import { getFirstZodErrorMessage } from "@/lib/api/validation";
+import { ZodError } from "zod";
 
 export async function POST(request: NextRequest) {
   try {
     await dbConnect();
-    const body: CreatePublicUrlRequest = await request.json();
+    const body = publicUrlCreateSchema.parse(await request.json());
     const { url, customAlias, expiresAt } = body;
 
     if (!url) {
@@ -110,6 +107,13 @@ export async function POST(request: NextRequest) {
     );
   } catch (error: unknown) {
     console.error("Public URL error:", error);
+
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        { success: false, error: getFirstZodErrorMessage(error) },
+        { status: 400 }
+      );
+    }
 
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(

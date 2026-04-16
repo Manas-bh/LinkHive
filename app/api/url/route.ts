@@ -11,20 +11,15 @@ import { isDuplicateKeyError } from "@/lib/api/errors";
 import { normalizeHttpUrl } from "@/lib/api/urlValidation";
 import { getOwnedCampaignById } from "@/lib/api/ownership";
 import type { IInfluencer } from "@/model/campaignModel";
+import { userUrlCreateSchema } from "@/lib/api/schemas";
+import { getFirstZodErrorMessage } from "@/lib/api/validation";
+import { ZodError } from "zod";
 
 interface ApiResponse {
   success: boolean;
   message: string;
   data?: IUrl;
   error?: string;
-}
-
-interface CreateUrlRequest {
-  url: string;
-  customAlias?: string;
-  campaignId?: string;
-  influencerId?: string;
-  expiresAt?: string | null;
 }
 
 export async function POST(
@@ -60,7 +55,7 @@ export async function POST(
 
     const user = authResult.user;
 
-    const body: CreateUrlRequest = await request.json();
+    const body = userUrlCreateSchema.parse(await request.json());
     const { url, customAlias, campaignId, influencerId, expiresAt } = body;
 
     // Validate required URL
@@ -300,8 +295,18 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    const err = error as Error;
-    console.error("URL creation error:", err);
+    console.error("URL creation error:", error);
+
+    if (error instanceof ZodError) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid request",
+          error: getFirstZodErrorMessage(error),
+        },
+        { status: 400 }
+      );
+    }
 
     if (isDuplicateKeyError(error)) {
       return NextResponse.json(
@@ -315,13 +320,14 @@ export async function POST(
     }
 
     return NextResponse.json(
-      {
-        success: false,
-        message: "Failed to create link",
-        error: err?.message || "Unknown error occurred",
-      },
-      { status: 500 }
-    );
+        {
+          success: false,
+          message: "Failed to create link",
+          error:
+            error instanceof Error ? error.message : "Unknown error occurred",
+        },
+        { status: 500 }
+      );
   }
 }
 

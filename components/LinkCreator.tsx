@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 interface LinkCreatorProps {
-  onLinkCreated?: (link: any) => void;
+  onLinkCreated?: (link: { shortUrl?: string; _id?: string }) => void;
 }
 
 export default function LinkCreator({ onLinkCreated }: LinkCreatorProps) {
@@ -43,7 +43,7 @@ export default function LinkCreator({ onLinkCreated }: LinkCreatorProps) {
       if (onLinkCreated) {
         onLinkCreated(data.data);
       }
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create link");
     } finally {
       setLoading(false);
