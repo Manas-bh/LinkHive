@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import Url from "@/model/urlModel";
-import User from "@/model/userModel";
 import dbConnect from "@/lib/dbConnect";
-import { auth } from "@/auth";
 import {
   aggregateClicksByDay,
   aggregateByDevice,
@@ -12,6 +9,9 @@ import {
   aggregateByGeo,
   getClickCoordinates,
 } from "@/lib/analytics";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { getOwnedUrlById } from "@/lib/api/ownership";
+import { parseBoundedInteger } from "@/lib/api/query";
 
 /**
  * GET /api/analytics/url/[id] - Get detailed analytics for a URL
@@ -23,21 +23,15 @@ export async function GET(
   try {
     await dbConnect();
 
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser("_id");
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     const { id } = await context.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -46,29 +40,23 @@ export async function GET(
         { status: 400 }
       );
     }
-    const url = await Url.findById(id);
-
-    if (!url) {
+    const ownedUrlResult = await getOwnedUrlById(id, String(user._id));
+    if ("error" in ownedUrlResult) {
       return NextResponse.json(
-        { success: false, error: "URL not found" },
-        { status: 404 }
+        { success: false, error: ownedUrlResult.error },
+        { status: ownedUrlResult.status }
       );
     }
 
-    // Verify ownership
-    if (!url.userId || url.userId.toString() !== String(user._id)) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 403 }
-      );
-    }
+    const { url } = ownedUrlResult;
 
     // Get query parameters
     const searchParams = request.nextUrl.searchParams;
-    const daysInput = Number(searchParams.get("days") ?? "30");
-    const days = Number.isFinite(daysInput)
-      ? Math.min(Math.max(Math.floor(daysInput), 1), 365)
-      : 30;
+    const days = parseBoundedInteger(searchParams.get("days"), {
+      fallback: 30,
+      min: 1,
+      max: 365,
+    });
 
     // Aggregate analytics
     const clicksByDay = aggregateClicksByDay(url.clickDetails, days);

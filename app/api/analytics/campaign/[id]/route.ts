@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import Campaign from "@/model/campaignModel";
 import Url from "@/model/urlModel";
-import User from "@/model/userModel";
 import dbConnect from "@/lib/dbConnect";
-import { auth } from "@/auth";
 import {
   aggregateClicksByDay,
   aggregateByDevice,
@@ -14,6 +11,10 @@ import {
   getClickCoordinates,
 } from "@/lib/analytics";
 import { IClickDetail } from "@/model/urlModel";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { getOwnedCampaignById } from "@/lib/api/ownership";
+import { parseBoundedInteger } from "@/lib/api/query";
+import type { IInfluencer } from "@/model/campaignModel";
 
 /**
  * GET /api/analytics/campaign/[id] - Get analytics for entire campaign
@@ -25,21 +26,15 @@ export async function GET(
   try {
     await dbConnect();
 
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser("_id");
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     const { id } = await context.params;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -48,22 +43,15 @@ export async function GET(
         { status: 400 }
       );
     }
-    const campaign = await Campaign.findById(id);
-
-    if (!campaign) {
+    const ownedCampaignResult = await getOwnedCampaignById(id, String(user._id));
+    if ("error" in ownedCampaignResult) {
       return NextResponse.json(
-        { success: false, error: "Campaign not found" },
-        { status: 404 }
+        { success: false, error: ownedCampaignResult.error },
+        { status: ownedCampaignResult.status }
       );
     }
 
-    // Verify ownership
-    if (campaign.userId.toString() !== String(user._id)) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 403 }
-      );
-    }
+    const { campaign } = ownedCampaignResult;
 
     // Get all URLs for this campaign
     const urls = await Url.find({ campaignId: id });
@@ -92,17 +80,15 @@ export async function GET(
     }
 
     // Combine all click details from all URLs
-    const allClicks: IClickDetail[] = [];
-    urls.forEach((url) => {
-      allClicks.push(...url.clickDetails);
-    });
+    const allClicks: IClickDetail[] = urls.flatMap((url) => url.clickDetails);
 
     // Get query parameters
     const searchParams = request.nextUrl.searchParams;
-    const daysInput = Number(searchParams.get("days") ?? "30");
-    const days = Number.isFinite(daysInput)
-      ? Math.min(Math.max(Math.floor(daysInput), 1), 365)
-      : 30;
+    const days = parseBoundedInteger(searchParams.get("days"), {
+      fallback: 30,
+      min: 1,
+      max: 365,
+    });
 
     // Aggregate analytics across all campaign URLs
     const clicksByDay = aggregateClicksByDay(allClicks, days);
@@ -119,40 +105,33 @@ export async function GET(
       0
     );
 
+    const urlById = new Map(urls.map((url) => [String(url._id), url]));
+
     // Get influencer-level analytics
-    const influencerAnalytics = await Promise.all(
-      campaign.influencers.map(async (influencer: any) => {
-        if (!influencer.urlId) {
-          return {
-            influencerId: influencer.influencerId,
-            name: influencer.name,
-            clicks: 0,
-            uniqueVisitors: 0,
-            clicksByDay: [],
-          };
-        }
+    const influencerAnalytics = campaign.influencers.map((influencer: IInfluencer) => {
+      const linkedUrl = influencer.urlId
+        ? urlById.get(String(influencer.urlId))
+        : undefined;
 
-        const url = await Url.findById(influencer.urlId);
-        if (!url) {
-          return {
-            influencerId: influencer.influencerId,
-            name: influencer.name,
-            clicks: 0,
-            uniqueVisitors: 0,
-            clicksByDay: [],
-          };
-        }
-
+      if (!linkedUrl) {
         return {
           influencerId: influencer.influencerId,
           name: influencer.name,
-          clicks: url.clicks || 0,
-          uniqueVisitors: url.uniqueVisitors || 0,
-          shortUrl: url.shortUrl,
-          clicksByDay: aggregateClicksByDay(url.clickDetails, days),
+          clicks: 0,
+          uniqueVisitors: 0,
+          clicksByDay: [],
         };
-      })
-    );
+      }
+
+      return {
+        influencerId: influencer.influencerId,
+        name: influencer.name,
+        clicks: linkedUrl.clicks || 0,
+        uniqueVisitors: linkedUrl.uniqueVisitors || 0,
+        shortUrl: linkedUrl.shortUrl,
+        clicksByDay: aggregateClicksByDay(linkedUrl.clickDetails, days),
+      };
+    });
 
     return NextResponse.json(
       {

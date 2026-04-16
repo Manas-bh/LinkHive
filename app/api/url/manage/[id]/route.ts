@@ -1,53 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { auth } from "@/auth";
 import dbConnect from "@/lib/dbConnect";
 import Url from "@/model/urlModel";
 import User from "@/model/userModel";
 import Campaign from "@/model/campaignModel";
-
-function normalizeSlugSegment(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function isValidSlugSegment(value: string) {
-  return /^[a-z0-9-]+$/.test(value);
-}
-
-function isDuplicateKeyError(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: number }).code === 11000
-  );
-}
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { isValidSlugSegment, normalizeSlugSegment } from "@/lib/api/slug";
+import { isDuplicateKeyError } from "@/lib/api/errors";
+import { parseExpiryInput } from "@/lib/api/urlExpiry";
+import { getOwnedUrlById } from "@/lib/api/ownership";
+import { normalizeHttpUrl } from "@/lib/api/urlValidation";
 
 async function getAuthorizedUserId() {
-  const session = await auth();
-  if (!session?.user?.email) {
-    return { error: "Unauthorized", status: 401 as const };
+  const authResult = await getAuthenticatedUser("_id");
+  if ("error" in authResult) {
+    return authResult;
   }
 
-  const user = await User.findOne({ email: session.user.email }).select("_id");
-  if (!user) {
-    return { error: "User not found", status: 404 as const };
-  }
-
-  return { userId: String(user._id) };
+  return { userId: String(authResult.user._id) };
 }
 
 async function getOwnedUrl(urlId: string, userId: string) {
-  const url = await Url.findById(urlId);
-  if (!url) {
-    return { error: "URL not found", status: 404 as const };
-  }
-
-  if (!url.userId || String(url.userId) !== userId) {
+  const result = await getOwnedUrlById(urlId, userId);
+  if ("error" in result && result.status === 403) {
     return { error: "Forbidden", status: 403 as const };
   }
 
-  return { url };
+  return result;
 }
 
 function invalidIdResponse() {
@@ -138,16 +117,15 @@ export async function PUT(
     const url = ownedUrl.url;
 
     if (typeof originalUrl === "string") {
-      try {
-        new URL(originalUrl);
-      } catch {
+      const normalizedOriginalUrl = normalizeHttpUrl(originalUrl);
+      if (!normalizedOriginalUrl) {
         return NextResponse.json(
-          { success: false, error: "Invalid destination URL" },
+          { success: false, error: "Invalid destination URL. Provide a valid http(s) URL" },
           { status: 400 }
         );
       }
 
-      url.originalUrl = originalUrl;
+      url.originalUrl = normalizedOriginalUrl;
     }
 
     if (customAlias !== undefined) {
@@ -185,7 +163,21 @@ export async function PUT(
     }
 
     if (expiresAt !== undefined) {
-      url.expiresAt = expiresAt ? new Date(expiresAt) : undefined;
+      const parsedExpiry = parseExpiryInput(expiresAt);
+      if (parsedExpiry.kind === "invalid") {
+        return NextResponse.json(
+          { success: false, error: parsedExpiry.error },
+          { status: 400 }
+        );
+      }
+
+      if (parsedExpiry.kind === "valid") {
+        url.expiresAt = parsedExpiry.date;
+      }
+
+      if (parsedExpiry.kind === "clear") {
+        url.expiresAt = undefined;
+      }
     }
 
     await url.save();

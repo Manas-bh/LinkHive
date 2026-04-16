@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
-import Campaign from '@/model/campaignModel';
 import Url from '@/model/urlModel';
-import User from '@/model/userModel';
 import dbConnect from '@/lib/dbConnect';
-import { auth } from '@/auth';
+import { getAuthenticatedUser } from '@/lib/api/auth';
+import { getOwnedCampaignById } from '@/lib/api/ownership';
+import { normalizeHttpUrl } from '@/lib/api/urlValidation';
+import type { IInfluencer } from '@/model/campaignModel';
+
+function mapCampaignStatusToUrlStatus(
+    status: 'active' | 'paused' | 'completed'
+): 'active' | 'paused' | 'disabled' {
+    if (status === 'active') {
+        return 'active';
+    }
+
+    if (status === 'paused') {
+        return 'paused';
+    }
+
+    return 'disabled';
+}
 
 function isValidCampaignStatus(status: unknown): status is 'active' | 'paused' | 'completed' {
     return status === 'active' || status === 'paused' || status === 'completed';
@@ -20,21 +35,15 @@ export async function GET(
     try {
         await dbConnect();
 
-        const session = await auth();
-        if (!session?.user?.email) {
+        const authResult = await getAuthenticatedUser('_id');
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user) {
-            return NextResponse.json(
-                { success: false, error: 'User not found' },
-                { status: 404 }
-            );
-        }
+        const user = authResult.user;
 
         const { id } = await params;
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -44,57 +53,54 @@ export async function GET(
             );
         }
 
-        const campaign = await Campaign.findById(id);
-
-        if (!campaign) {
+        const ownedCampaignResult = await getOwnedCampaignById(id, String(user._id));
+        if ('error' in ownedCampaignResult) {
             return NextResponse.json(
-                { success: false, error: 'Campaign not found' },
-                { status: 404 }
+                { success: false, error: ownedCampaignResult.error },
+                { status: ownedCampaignResult.status }
             );
         }
 
-        // Verify ownership
-        if (campaign.userId.toString() !== (user._id as any).toString()) {
-            return NextResponse.json(
-                { success: false, error: 'Unauthorized' },
-                { status: 403 }
-            );
-        }
+        const { campaign } = ownedCampaignResult;
+
+        const influencerUrlIds = campaign.influencers
+            .map((influencer: IInfluencer) => influencer.urlId)
+            .filter(Boolean);
+
+        const influencerUrls = influencerUrlIds.length
+            ? await Url.find({ _id: { $in: influencerUrlIds } })
+            : [];
+
+        const urlById = new Map(
+            influencerUrls.map((url) => [String(url._id), url])
+        );
 
         // Get detailed metrics for each influencer
-        const influencersWithMetrics = await Promise.all(
-            campaign.influencers.map(async (influencer: any) => {
-                if (!influencer.urlId) {
-                    return {
-                        ...influencer,
-                        clicks: 0,
-                        uniqueVisitors: 0,
-                        url: null,
-                    };
-                }
+        const influencersWithMetrics = campaign.influencers.map((influencer: IInfluencer) => {
+            const linkedUrl = influencer.urlId
+                ? urlById.get(String(influencer.urlId))
+                : undefined;
 
-                const url = await Url.findById(influencer.urlId);
-                if (!url) {
-                    return {
-                        ...influencer,
-                        clicks: 0,
-                        uniqueVisitors: 0,
-                        url: null,
-                    };
-                }
-
+            if (!linkedUrl) {
                 return {
-                    influencerId: influencer.influencerId,
-                    name: influencer.name,
-                    customSlug: influencer.customSlug,
-                    clicks: url.clicks || 0,
-                    uniqueVisitors: url.uniqueVisitors || 0,
-                    shortUrl: url.shortUrl,
-                    qrCode: url.qrCode,
-                    urlId: url._id,
+                    ...influencer,
+                    clicks: 0,
+                    uniqueVisitors: 0,
+                    url: null,
                 };
-            })
-        );
+            }
+
+            return {
+                influencerId: influencer.influencerId,
+                name: influencer.name,
+                customSlug: influencer.customSlug,
+                clicks: linkedUrl.clicks || 0,
+                uniqueVisitors: linkedUrl.uniqueVisitors || 0,
+                shortUrl: linkedUrl.shortUrl,
+                qrCode: linkedUrl.qrCode,
+                urlId: linkedUrl._id,
+            };
+        });
 
         // Calculate campaign totals
         const totalClicks = influencersWithMetrics.reduce(
@@ -140,21 +146,15 @@ export async function PUT(
     try {
         await dbConnect();
 
-        const session = await auth();
-        if (!session?.user?.email) {
+        const authResult = await getAuthenticatedUser('_id');
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user) {
-            return NextResponse.json(
-                { success: false, error: 'User not found' },
-                { status: 404 }
-            );
-        }
+        const user = authResult.user;
 
         const { id } = await params;
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -164,22 +164,15 @@ export async function PUT(
             );
         }
 
-        const campaign = await Campaign.findById(id);
-
-        if (!campaign) {
+        const ownedCampaignResult = await getOwnedCampaignById(id, String(user._id));
+        if ('error' in ownedCampaignResult) {
             return NextResponse.json(
-                { success: false, error: 'Campaign not found' },
-                { status: 404 }
+                { success: false, error: ownedCampaignResult.error },
+                { status: ownedCampaignResult.status }
             );
         }
 
-        // Verify ownership
-        if (campaign.userId.toString() !== (user._id as any).toString()) {
-            return NextResponse.json(
-                { success: false, error: 'Unauthorized' },
-                { status: 403 }
-            );
-        }
+        const { campaign } = ownedCampaignResult;
 
         const body = await request.json();
         const { name, description, status, destinationUrl } = body;
@@ -191,24 +184,43 @@ export async function PUT(
             );
         }
 
+        let normalizedDestinationUrl: string | undefined;
         if (destinationUrl !== undefined) {
-            try {
-                new URL(destinationUrl);
-            } catch {
+            const parsedDestinationUrl = normalizeHttpUrl(String(destinationUrl));
+            if (!parsedDestinationUrl) {
                 return NextResponse.json(
-                    { success: false, error: 'Invalid destination URL' },
+                    { success: false, error: 'Invalid destination URL. Provide a valid http(s) URL' },
                     { status: 400 }
                 );
             }
+
+            normalizedDestinationUrl = parsedDestinationUrl;
         }
 
         // Update fields
         if (name) campaign.name = name;
         if (description !== undefined) campaign.description = description;
         if (status !== undefined) campaign.status = status;
-        if (destinationUrl !== undefined) campaign.destinationUrl = destinationUrl;
+        if (normalizedDestinationUrl !== undefined)
+            campaign.destinationUrl = normalizedDestinationUrl;
 
         await campaign.save();
+
+        const urlUpdates: Record<string, unknown> = {};
+        if (normalizedDestinationUrl !== undefined) {
+            urlUpdates.originalUrl = normalizedDestinationUrl;
+        }
+
+        if (status !== undefined) {
+            urlUpdates.status = mapCampaignStatusToUrlStatus(status);
+        }
+
+        if (Object.keys(urlUpdates).length > 0) {
+            await Url.updateMany(
+                { campaignId: campaign._id },
+                { $set: urlUpdates }
+            );
+        }
 
         return NextResponse.json(
             {
@@ -239,21 +251,15 @@ export async function DELETE(
     try {
         await dbConnect();
 
-        const session = await auth();
-        if (!session?.user?.email) {
+        const authResult = await getAuthenticatedUser();
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user) {
-            return NextResponse.json(
-                { success: false, error: 'User not found' },
-                { status: 404 }
-            );
-        }
+        const user = authResult.user;
 
         const { id } = await params;
         if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -263,22 +269,15 @@ export async function DELETE(
             );
         }
 
-        const campaign = await Campaign.findById(id);
-
-        if (!campaign) {
+        const ownedCampaignResult = await getOwnedCampaignById(id, String(user._id));
+        if ('error' in ownedCampaignResult) {
             return NextResponse.json(
-                { success: false, error: 'Campaign not found' },
-                { status: 404 }
+                { success: false, error: ownedCampaignResult.error },
+                { status: ownedCampaignResult.status }
             );
         }
 
-        // Verify ownership
-        if (campaign.userId.toString() !== (user._id as any).toString()) {
-            return NextResponse.json(
-                { success: false, error: 'Unauthorized' },
-                { status: 403 }
-            );
-        }
+        const { campaign } = ownedCampaignResult;
 
         // Delete all URLs associated with this campaign
         const campaignUrls = await Url.find({ campaignId: id }).select('_id');
@@ -286,20 +285,20 @@ export async function DELETE(
         await Url.deleteMany({ campaignId: id });
 
         // Delete campaign
-        await Campaign.findByIdAndDelete(id);
+        await campaign.deleteOne();
 
         // Remove campaign and URLs from user references
         let userChanged = false;
         if (user.campaigns) {
             user.campaigns = user.campaigns.filter(
-                (cid: any) => cid.toString() !== id
+                (cid) => String(cid) !== id
             );
             userChanged = true;
         }
 
         if (user.urls && campaignUrlIds.length) {
             user.urls = user.urls.filter(
-                (uid: any) => !campaignUrlIds.includes(uid.toString())
+                (uid) => !campaignUrlIds.includes(String(uid))
             );
             userChanged = true;
         }

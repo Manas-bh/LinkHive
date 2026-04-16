@@ -5,6 +5,7 @@ import Credentials from "next-auth/providers/credentials";
 import dbConnect from "@/lib/dbConnect";
 import User from "@/model/userModel";
 import { verifyPassword } from "@/lib/password";
+import SystemSettings from "@/model/systemSettingsModel";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   providers: [
@@ -59,7 +60,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
       try {
         await dbConnect();
+        const settings = await SystemSettings.findOne().select(
+          "allowRegistration maintenanceMode"
+        );
         const existingUser = await User.findOne({ email: user.email });
+
+        if (!existingUser && settings?.allowRegistration === false) {
+          return false;
+        }
+
+        if (settings?.maintenanceMode && existingUser?.role !== "admin") {
+          return false;
+        }
 
         if (!existingUser) {
           await User.create({
@@ -89,7 +101,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           await dbConnect();
           const dbUser = await User.findOne({ email: user.email });
           if (dbUser) {
-            token.id = (dbUser as any)._id.toString();
+            token.id = dbUser._id.toString();
             token.role = dbUser.role;
           }
         } catch (error) {
@@ -100,8 +112,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (session.user && token.id) {
-        (session.user as any).id = token.id as string;
-        (session.user as any).role = token.role;
+        session.user.id = token.id as string;
+
+        if (token.role === "admin" || token.role === "user") {
+          session.user.role = token.role;
+        }
       }
       return session;
     },

@@ -9,7 +9,7 @@ export async function GET(
     const { code } = await params;
     const destination = await resolveLinkAndTrack(code, request);
     return NextResponse.redirect(destination, { status: 302 });
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error instanceof LinkRedirectError) {
       return NextResponse.json(
         { error: error.message },

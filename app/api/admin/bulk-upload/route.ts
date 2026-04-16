@@ -1,37 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/auth';
 import dbConnect from '@/lib/dbConnect';
-import User from '@/model/userModel';
 import Url from '@/model/urlModel';
 import { nanoid } from 'nanoid';
 import { generateQRCode } from '@/lib/qrcode';
+import { getAuthenticatedAdmin } from '@/lib/api/auth';
+import { isValidSlugSegment, normalizeSlugSegment } from '@/lib/api/slug';
+import { isDuplicateKeyError } from '@/lib/api/errors';
+import { getDefaultUrlExpiryDate } from '@/lib/api/urlExpiry';
+import { normalizeHttpUrl } from '@/lib/api/urlValidation';
 
-function sanitizeAlias(alias: string) {
-    return alias.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-}
+type BulkUrlInput = {
+    originalUrl?: unknown;
+    customAlias?: unknown;
+};
+
+type BulkUploadResult = {
+    success: Array<{ originalUrl: string; shortUrl: string; customAlias?: string }>;
+    failed: Array<{ url: BulkUrlInput; error: string }>;
+};
 
 export async function POST(request: NextRequest) {
     try {
-        const session = await auth();
-        if (!session?.user?.email) {
-            return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
-            );
-        }
-
         await dbConnect();
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user || user.role !== 'admin') {
+        const authResult = await getAuthenticatedAdmin();
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Forbidden: Admin access required' },
-                { status: 403 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
+        const user = authResult.user;
+
         const body = await request.json();
-        const { urls } = body; // Array of { originalUrl, customAlias? }
+        const { urls } = body as { urls?: BulkUrlInput[] }; // Array of { originalUrl, customAlias? }
 
         if (!Array.isArray(urls) || urls.length === 0) {
             return NextResponse.json(
@@ -40,13 +43,13 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const results: {
-            success: Array<{ originalUrl: string; shortUrl: string; customAlias?: string }>;
-            failed: Array<{ url: any; error: string }>;
-        } = {
+        const results: BulkUploadResult = {
             success: [],
             failed: []
         };
+
+        const seenAliases = new Set<string>();
+        const defaultExpiryDate = await getDefaultUrlExpiryDate();
 
         for (const urlData of urls) {
             try {
@@ -58,19 +61,37 @@ export async function POST(request: NextRequest) {
                     continue;
                 }
 
-                try {
-                    new URL(urlData.originalUrl);
-                } catch {
+                const normalizedOriginalUrl = normalizeHttpUrl(String(urlData.originalUrl));
+                if (!normalizedOriginalUrl) {
                     results.failed.push({
                         url: urlData,
-                        error: 'Invalid URL format'
+                        error: 'Invalid URL format. Provide a valid http(s) URL'
                     });
                     continue;
                 }
 
-                const normalizedAlias = urlData.customAlias
-                    ? sanitizeAlias(urlData.customAlias)
+                const rawAlias = urlData.customAlias
+                    ? String(urlData.customAlias)
                     : undefined;
+                const normalizedAlias = rawAlias
+                    ? normalizeSlugSegment(rawAlias)
+                    : undefined;
+
+                if (normalizedAlias && !isValidSlugSegment(normalizedAlias)) {
+                    results.failed.push({
+                        url: urlData,
+                        error: `Custom alias '${normalizedAlias}' contains invalid characters`
+                    });
+                    continue;
+                }
+
+                if (normalizedAlias && seenAliases.has(normalizedAlias)) {
+                    results.failed.push({
+                        url: urlData,
+                        error: `Custom alias '${normalizedAlias}' is duplicated in payload`
+                    });
+                    continue;
+                }
 
                 // Check if custom alias already exists
                 if (normalizedAlias) {
@@ -84,15 +105,18 @@ export async function POST(request: NextRequest) {
                         });
                         continue;
                     }
+
+                    seenAliases.add(normalizedAlias);
                 }
 
                 const urlCode = normalizedAlias || nanoid(7);
                 const newUrl = new Url({
-                    originalUrl: urlData.originalUrl,
+                    originalUrl: normalizedOriginalUrl,
                     urlCode,
                     customAlias: normalizedAlias,
-                    userId: (user as any)._id,
+                    userId: user._id,
                     clickDetails: [],
+                    expiresAt: new Date(defaultExpiryDate),
                     status: 'active',
                 });
 
@@ -111,7 +135,7 @@ export async function POST(request: NextRequest) {
                 if (!user.urls) {
                     user.urls = [];
                 }
-                user.urls.push((newUrl as any)._id);
+                user.urls.push(newUrl._id);
 
                 results.success.push({
                     originalUrl: newUrl.originalUrl,
@@ -119,10 +143,18 @@ export async function POST(request: NextRequest) {
                     customAlias: newUrl.customAlias
                 });
 
-            } catch (error: any) {
+            } catch (error: unknown) {
+                if (isDuplicateKeyError(error)) {
+                    results.failed.push({
+                        url: urlData,
+                        error: 'Custom alias already exists'
+                    });
+                    continue;
+                }
+
                 results.failed.push({
                     url: urlData,
-                    error: error.message
+                    error: error instanceof Error ? error.message : 'Unknown error'
                 });
             }
         }
@@ -135,10 +167,13 @@ export async function POST(request: NextRequest) {
             message: `Successfully created ${results.success.length} URLs, ${results.failed.length} failed`
         });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error in bulk upload:', error);
         return NextResponse.json(
-            { success: false, error: error.message || 'Internal Server Error' },
+            {
+                success: false,
+                error: error instanceof Error ? error.message : 'Internal Server Error'
+            },
             { status: 500 }
         );
     }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
-import { auth } from '@/auth';
 import dbConnect from '@/lib/dbConnect';
 import User from '@/model/userModel';
+import { getAuthenticatedAdmin } from '@/lib/api/auth';
 
 export async function PUT(
     request: NextRequest,
@@ -17,22 +17,13 @@ export async function PUT(
             );
         }
 
-        const session = await auth();
-        if (!session?.user?.email) {
-            return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
-            );
-        }
-
         await dbConnect();
 
-        // Verify admin
-        const currentUser = await User.findOne({ email: session.user.email });
-        if (!currentUser || currentUser.role !== 'admin') {
+        const authResult = await getAuthenticatedAdmin('email role');
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Forbidden: Admin access required' },
-                { status: 403 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
@@ -62,7 +53,7 @@ export async function PUT(
         }
 
         // Prevent modifying self
-        if (targetUser.email === session.user.email) {
+        if (targetUser.email === authResult.email) {
             return NextResponse.json(
                 { success: false, error: 'Cannot modify your own account' },
                 { status: 400 }
@@ -80,10 +71,13 @@ export async function PUT(
             message: 'User updated successfully'
         });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error updating user:', error);
         return NextResponse.json(
-            { success: false, error: error.message || 'Internal Server Error' },
+            {
+                success: false,
+                error: error instanceof Error ? error.message : 'Internal Server Error'
+            },
             { status: 500 }
         );
     }

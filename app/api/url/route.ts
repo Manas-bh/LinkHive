@@ -2,19 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import Url, { IUrl } from "@/model/urlModel";
-import User from "@/model/userModel";
-import Campaign from "@/model/campaignModel";
 import dbConnect from "@/lib/dbConnect";
-import { auth } from "@/auth";
 import { generateQRCode } from "@/lib/qrcode";
-
-function normalizeSlugSegment(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function isValidSlugSegment(value: string) {
-  return /^[a-z0-9-]+$/.test(value);
-}
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { isValidSlugSegment, normalizeSlugSegment } from "@/lib/api/slug";
+import { getDefaultUrlExpiryDate, parseExpiryInput } from "@/lib/api/urlExpiry";
+import { isDuplicateKeyError } from "@/lib/api/errors";
+import { normalizeHttpUrl } from "@/lib/api/urlValidation";
+import { getOwnedCampaignById } from "@/lib/api/ownership";
+import type { IInfluencer } from "@/model/campaignModel";
 
 interface ApiResponse {
   success: boolean;
@@ -28,16 +24,7 @@ interface CreateUrlRequest {
   customAlias?: string;
   campaignId?: string;
   influencerId?: string;
-  expiresAt?: string;
-}
-
-function isDuplicateKeyError(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: number }).code === 11000
-  );
+  expiresAt?: string | null;
 }
 
 export async function POST(
@@ -46,18 +33,32 @@ export async function POST(
   try {
     await dbConnect();
 
-    // Get authenticated user
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser();
+    if ("error" in authResult) {
+      const message =
+        authResult.status === 404
+          ? "User not found"
+          : authResult.status === 403
+            ? "Account is disabled"
+            : "Authentication required";
+      const error =
+        authResult.status === 404
+          ? "User account not found"
+          : authResult.status === 403
+            ? "Your account is disabled"
+            : "Please sign in to create links";
+
       return NextResponse.json(
         {
           success: false,
-          message: "Authentication required",
-          error: "Please sign in to create links",
+          message,
+          error,
         },
-        { status: 401 }
+        { status: authResult.status }
       );
     }
+
+    const user = authResult.user;
 
     const body: CreateUrlRequest = await request.json();
     const { url, customAlias, campaignId, influencerId, expiresAt } = body;
@@ -74,30 +75,15 @@ export async function POST(
       );
     }
 
-    // Validate URL format
-    try {
-      new URL(url);
-    } catch {
+    const normalizedUrl = normalizeHttpUrl(url);
+    if (!normalizedUrl) {
       return NextResponse.json(
         {
           success: false,
           message: "Invalid URL format",
-          error: "Please provide a valid URL",
+          error: "Please provide a valid http(s) URL",
         },
         { status: 400 }
-      );
-    }
-
-    // Find user in database
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "User not found",
-          error: "User account not found",
-        },
-        { status: 404 }
       );
     }
 
@@ -153,29 +139,29 @@ export async function POST(
         );
       }
 
-      campaign = await Campaign.findById(campaignId);
-      if (!campaign) {
+      const ownedCampaignResult = await getOwnedCampaignById(
+        campaignId,
+        String(user._id)
+      );
+      if ("error" in ownedCampaignResult) {
+        const message =
+          ownedCampaignResult.status === 404 ? "Campaign not found" : "Unauthorized";
+        const error =
+          ownedCampaignResult.status === 404
+            ? "Invalid campaign ID"
+            : "You don't have access to this campaign";
+
         return NextResponse.json(
           {
             success: false,
-            message: "Campaign not found",
-            error: "Invalid campaign ID",
+            message,
+            error,
           },
-          { status: 404 }
+          { status: ownedCampaignResult.status }
         );
       }
 
-      // Verify campaign belongs to user
-      if (campaign.userId.toString() !== (user._id as any).toString()) {
-        return NextResponse.json(
-          {
-            success: false,
-            message: "Unauthorized",
-            error: "You don't have access to this campaign",
-          },
-          { status: 403 }
-        );
-      }
+      campaign = ownedCampaignResult.campaign;
 
       // Require influencer ID for campaign links
       if (!normalizedInfluencerId) {
@@ -202,8 +188,8 @@ export async function POST(
       }
 
       const existingInfluencer = campaign.influencers.find(
-        (inf: any) =>
-          normalizeSlugSegment(String(inf.influencerId)) === normalizedInfluencerId
+        (inf: IInfluencer) =>
+          normalizeSlugSegment(inf.influencerId) === normalizedInfluencerId
       );
 
       if (existingInfluencer?.urlId) {
@@ -217,6 +203,23 @@ export async function POST(
         );
       }
     }
+
+    const parsedExpiry = parseExpiryInput(expiresAt);
+    if (parsedExpiry.kind === "invalid") {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid expiration date",
+          error: parsedExpiry.error,
+        },
+        { status: 400 }
+      );
+    }
+
+    const resolvedExpiresAt =
+      parsedExpiry.kind === "valid"
+        ? parsedExpiry.date
+        : await getDefaultUrlExpiryDate();
 
     // Generate URL code
     const urlCode = normalizedAlias || nanoid(7);
@@ -236,19 +239,17 @@ export async function POST(
     }
 
     // Create URL document
-    const link: Partial<IUrl> = {
-      originalUrl: url,
-      urlCode: urlCode,
+    const newLink = new Url({
+      originalUrl: normalizedUrl,
+      urlCode,
       customAlias: normalizedAlias || undefined,
-      userId: user._id as any,
-      campaignId: campaignId ? (campaign!._id as any) : undefined,
+      userId: user._id,
+      campaignId: campaign?._id,
       influencerId: normalizedInfluencerId || undefined,
       clickDetails: [],
-      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      expiresAt: resolvedExpiresAt,
       status: "active",
-    };
-
-    const newLink = new Url(link);
+    });
     await newLink.save();
 
     // Generate QR code
@@ -271,8 +272,8 @@ export async function POST(
     // If campaign link, add to campaign's influencers
     if (campaign && normalizedInfluencerId) {
       const influencerIndex = campaign.influencers.findIndex(
-        (inf: any) =>
-          normalizeSlugSegment(String(inf.influencerId)) === normalizedInfluencerId
+        (inf: IInfluencer) =>
+          normalizeSlugSegment(inf.influencerId) === normalizedInfluencerId
       );
 
       if (influencerIndex >= 0) {
@@ -333,29 +334,18 @@ export async function GET(): Promise<
   try {
     await dbConnect();
 
-    // Get authenticated user
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser("_id");
+    if ("error" in authResult) {
       return NextResponse.json(
         {
           success: false,
-          error: "Authentication required",
+          error: authResult.error,
         },
-        { status: 401 }
+        { status: authResult.status }
       );
     }
 
-    // Find user
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "User not found",
-        },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     // Get all URLs for this user
     const urls = await Url.find({ userId: user._id })

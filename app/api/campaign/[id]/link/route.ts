@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
-import Campaign from '@/model/campaignModel';
 import Url from '@/model/urlModel';
-import User from '@/model/userModel';
 import dbConnect from '@/lib/dbConnect';
-import { auth } from '@/auth';
 import { nanoid } from 'nanoid';
 import { generateQRCode } from '@/lib/qrcode';
-
-function isValidSlugSegment(value: string) {
-    return /^[a-z0-9-]+$/.test(value);
-}
-
-function normalizeSlugSegment(value: string) {
-    return value.trim().toLowerCase();
-}
+import { getAuthenticatedUser } from '@/lib/api/auth';
+import { isValidSlugSegment, normalizeSlugSegment } from '@/lib/api/slug';
+import { getOwnedCampaignById } from '@/lib/api/ownership';
+import { getDefaultUrlExpiryDate } from '@/lib/api/urlExpiry';
+import { isDuplicateKeyError } from '@/lib/api/errors';
+import type { IInfluencer } from '@/model/campaignModel';
 
 /**
  * POST /api/campaign/[id]/link - Generate a new influencer link for a campaign
@@ -34,37 +29,25 @@ export async function POST(
             );
         }
 
-        const session = await auth();
-        if (!session?.user?.email) {
+        const authResult = await getAuthenticatedUser();
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user) {
+        const user = authResult.user;
+
+        const ownedCampaignResult = await getOwnedCampaignById(id, String(user._id));
+        if ('error' in ownedCampaignResult) {
             return NextResponse.json(
-                { success: false, error: 'User not found' },
-                { status: 404 }
+                { success: false, error: ownedCampaignResult.error },
+                { status: ownedCampaignResult.status }
             );
         }
 
-        const campaign = await Campaign.findById(id);
-        if (!campaign) {
-            return NextResponse.json(
-                { success: false, error: 'Campaign not found' },
-                { status: 404 }
-            );
-        }
-
-        // Verify ownership
-        if (campaign.userId.toString() !== (user as any)._id.toString()) {
-            return NextResponse.json(
-                { success: false, error: 'Unauthorized' },
-                { status: 403 }
-            );
-        }
+        const { campaign } = ownedCampaignResult;
 
         const body = await request.json();
         const { influencerId, name, customSlug } = body;
@@ -103,7 +86,7 @@ export async function POST(
 
         // Check if influencer ID already exists in this campaign
         const existingInfluencer = campaign.influencers.find(
-            (inf: any) => inf.influencerId === normalizedInfluencerId
+            (inf: IInfluencer) => normalizeSlugSegment(inf.influencerId) === normalizedInfluencerId
         );
 
         if (existingInfluencer) {
@@ -134,6 +117,7 @@ export async function POST(
             campaignId: campaign._id,
             influencerId: normalizedInfluencerId,
             clickDetails: [],
+            expiresAt: await getDefaultUrlExpiryDate(),
             status: 'active',
         });
 
@@ -178,10 +162,21 @@ export async function POST(
             },
             { status: 201 }
         );
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Error generating influencer link:', error);
+
+        if (isDuplicateKeyError(error)) {
+            return NextResponse.json(
+                { success: false, error: 'A generated campaign link already exists with this slug' },
+                { status: 409 }
+            );
+        }
+
         return NextResponse.json(
-            { success: false, error: error.message || 'Failed to generate link' },
+            {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to generate link'
+            },
             { status: 500 }
         );
     }

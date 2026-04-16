@@ -30,7 +30,7 @@ export default function Sidebar() {
         { icon: HelpCircle, label: 'Help & FAQ', href: '/help', color: 'text-pink-400' },
     ];
 
-    if ((session?.user as any)?.role === 'admin') {
+    if (session?.user?.role === 'admin') {
         menuItems.push({ icon: Shield, label: 'Admin', href: '/admin', color: 'text-red-400' });
     }
 

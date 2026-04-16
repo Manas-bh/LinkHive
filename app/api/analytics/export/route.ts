@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import mongoose from 'mongoose';
 import Url from '@/model/urlModel';
-import Campaign from '@/model/campaignModel';
-import User from '@/model/userModel';
 import dbConnect from '@/lib/dbConnect';
-import { auth } from '@/auth';
+import { getAuthenticatedUser } from '@/lib/api/auth';
+import { getOwnedCampaignById, getOwnedUrlById } from '@/lib/api/ownership';
+import type { IClickDetail } from '@/model/urlModel';
+
+type ClickExportRow = IClickDetail & {
+    influencerId?: string;
+    shortUrl?: string;
+};
 
 function sanitizeForCsv(value: unknown): string {
     const raw = String(value ?? '');
@@ -39,21 +44,15 @@ export async function GET(request: NextRequest) {
     try {
         await dbConnect();
 
-        const session = await auth();
-        if (!session?.user?.email) {
+        const authResult = await getAuthenticatedUser('_id');
+        if ('error' in authResult) {
             return NextResponse.json(
-                { success: false, error: 'Authentication required' },
-                { status: 401 }
+                { success: false, error: authResult.error },
+                { status: authResult.status }
             );
         }
 
-        const user = await User.findOne({ email: session.user.email });
-        if (!user) {
-            return NextResponse.json(
-                { success: false, error: 'User not found' },
-                { status: 404 }
-            );
-        }
+        const user = authResult.user;
 
         const searchParams = request.nextUrl.searchParams;
         const urlId = searchParams.get('urlId');
@@ -66,7 +65,7 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        let data: any[] = [];
+        let data: ClickExportRow[] = [];
         let filename = 'analytics.csv';
 
         if (urlId) {
@@ -77,14 +76,15 @@ export async function GET(request: NextRequest) {
                 );
             }
 
-            const url = await Url.findById(urlId);
-            if (!url) {
-                return NextResponse.json({ success: false, error: 'URL not found' }, { status: 404 });
+            const ownedUrlResult = await getOwnedUrlById(urlId, String(user._id));
+            if ('error' in ownedUrlResult) {
+                return NextResponse.json(
+                    { success: false, error: ownedUrlResult.error },
+                    { status: ownedUrlResult.status }
+                );
             }
 
-            if (!url.userId || String(url.userId) !== String(user._id)) {
-                return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
-            }
+            const { url } = ownedUrlResult;
 
             data = url.clickDetails;
             filename = `analytics-${url.customAlias || url.urlCode}.csv`;
@@ -96,21 +96,22 @@ export async function GET(request: NextRequest) {
                 );
             }
 
-            const campaign = await Campaign.findById(campaignId);
-            if (!campaign) {
-                return NextResponse.json({ success: false, error: 'Campaign not found' }, { status: 404 });
+            const ownedCampaignResult = await getOwnedCampaignById(campaignId, String(user._id));
+            if ('error' in ownedCampaignResult) {
+                return NextResponse.json(
+                    { success: false, error: ownedCampaignResult.error },
+                    { status: ownedCampaignResult.status }
+                );
             }
 
-            if (String(campaign.userId) !== String(user._id)) {
-                return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 403 });
-            }
+            const { campaign } = ownedCampaignResult;
 
             // Fetch all URLs for this campaign
             const urls = await Url.find({ campaignId: campaign._id });
 
             // Combine click details from all URLs
             data = urls.flatMap(url =>
-                url.clickDetails.map((click: any) => ({
+                url.clickDetails.map((click: IClickDetail) => ({
                     ...click,
                     influencerId: url.influencerId, // Add influencer ID context
                     shortUrl: url.shortUrl
@@ -133,7 +134,7 @@ export async function GET(request: NextRequest) {
             'Short URL'
         ].join(',') + '\n';
 
-        const csvRows = data.map((click: any) => {
+        const csvRows = data.map((click) => {
             const date = toIsoDate(click.timestamp);
             const ip = click.ip || '';
             const country = click.country || '';
@@ -171,7 +172,7 @@ export async function GET(request: NextRequest) {
             },
         });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('Export error:', error);
         return NextResponse.json(
             { success: false, error: 'Failed to export analytics' },

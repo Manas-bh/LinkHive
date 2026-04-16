@@ -1,19 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import Campaign from "@/model/campaignModel";
-import User from "@/model/userModel";
 import Url from "@/model/urlModel";
 import dbConnect from "@/lib/dbConnect";
-import { auth } from "@/auth";
 import { nanoid } from "nanoid";
 import { generateQRCode } from "@/lib/qrcode";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { isValidSlugSegment, normalizeSlugSegment } from "@/lib/api/slug";
+import { getDefaultUrlExpiryDate } from "@/lib/api/urlExpiry";
+import { normalizeHttpUrl } from "@/lib/api/urlValidation";
+import { isDuplicateKeyError } from "@/lib/api/errors";
+import type { IInfluencer } from "@/model/campaignModel";
 
-function isValidSlugSegment(value: string) {
-  return /^[a-z0-9-]+$/.test(value);
-}
-
-function normalizeSlugSegment(value: string) {
-  return value.trim().toLowerCase();
-}
+type PreparedInfluencer = {
+  influencerId: string;
+  name: string;
+  customSlug?: string;
+  urlCode: string;
+};
 
 /**
  * POST /api/campaign - Create a new campaign
@@ -22,23 +25,15 @@ export async function POST(request: NextRequest) {
   try {
     await dbConnect();
 
-    // Get authenticated user
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser();
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    // Find user
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     const body = await request.json();
     const { name, description, destinationUrl, influencers } = body;
@@ -51,12 +46,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate destination URL
-    try {
-      new URL(destinationUrl);
-    } catch {
+    const normalizedDestinationUrl = normalizeHttpUrl(destinationUrl);
+    if (!normalizedDestinationUrl) {
       return NextResponse.json(
-        { success: false, error: "Invalid destination URL" },
+        { success: false, error: "Invalid destination URL. Provide a valid http(s) URL" },
         { status: 400 }
       );
     }
@@ -70,7 +63,7 @@ export async function POST(request: NextRequest) {
     if (Array.isArray(influencers)) {
       const seenInfluencerIds = new Set<string>();
 
-      for (const item of influencers) {
+      for (const item of influencers as Partial<IInfluencer>[]) {
         if (!item?.influencerId) {
           continue;
         }
@@ -121,12 +114,56 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const preparedInfluencers: PreparedInfluencer[] = [];
+    if (normalizedInfluencers.length) {
+      const generatedCodes = new Set<string>();
+
+      for (const influencer of normalizedInfluencers) {
+        const influencerSlug = influencer.customSlug || nanoid(7);
+        const urlCode = `i-${influencer.influencerId}-${influencerSlug}`;
+
+        if (generatedCodes.has(urlCode)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Generated duplicate code for influencer ${influencer.influencerId}`,
+            },
+            { status: 409 }
+          );
+        }
+
+        generatedCodes.add(urlCode);
+        preparedInfluencers.push({
+          ...influencer,
+          urlCode,
+        });
+      }
+
+      const existingCode = await Url.findOne({
+        $or: preparedInfluencers.flatMap((influencer) => [
+          { urlCode: influencer.urlCode },
+          { customAlias: influencer.urlCode },
+        ]),
+      }).select("urlCode customAlias");
+
+      if (existingCode) {
+        const conflictingCode = existingCode.customAlias || existingCode.urlCode;
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Generated campaign code conflict: ${conflictingCode}`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
     // Create campaign
     const campaign = new Campaign({
       name,
       description: description || "",
       userId: user._id,
-      destinationUrl,
+      destinationUrl: normalizedDestinationUrl,
       influencers: [],
       status: "active",
     });
@@ -134,31 +171,19 @@ export async function POST(request: NextRequest) {
     await campaign.save();
 
     // Generate influencer links if provided
-    if (normalizedInfluencers.length) {
-      for (const inf of normalizedInfluencers) {
-        const influencerSlug = inf.customSlug || nanoid(7);
-        const urlCode = `i-${inf.influencerId}-${influencerSlug}`;
+    if (preparedInfluencers.length) {
+      const defaultExpiryDate = await getDefaultUrlExpiryDate();
 
-        const existingCode = await Url.findOne({
-          $or: [{ urlCode }, { customAlias: urlCode }],
-        }).select("_id");
-        if (existingCode) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Generated link code conflict for influencer ${inf.influencerId}`,
-            },
-            { status: 409 }
-          );
-        }
+      for (const inf of preparedInfluencers) {
 
         const url = new Url({
-          originalUrl: destinationUrl,
-          urlCode,
+          originalUrl: normalizedDestinationUrl,
+          urlCode: inf.urlCode,
           userId: user._id,
           campaignId: campaign._id,
           influencerId: inf.influencerId,
           clickDetails: [],
+          expiresAt: new Date(defaultExpiryDate),
           status: "active",
         });
 
@@ -196,7 +221,7 @@ export async function POST(request: NextRequest) {
     if (!user.campaigns) {
       user.campaigns = [];
     }
-    user.campaigns.push(campaign._id as any);
+    user.campaigns.push(campaign._id);
     await user.save();
 
     return NextResponse.json(
@@ -208,6 +233,17 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error("Campaign creation error:", error);
+
+    if (isDuplicateKeyError(error)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Campaign contains conflicting influencer link codes",
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       {
         success: false,
@@ -226,54 +262,59 @@ export async function GET() {
   try {
     await dbConnect();
 
-    // Get authenticated user
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser("_id");
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    // Find user
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     // Get all campaigns for this user
     const campaigns = await Campaign.find({ userId: user._id }).sort({
       createdAt: -1,
     });
 
-    // Calculate aggregated metrics for each campaign
-    const campaignsWithMetrics = await Promise.all(
-      campaigns.map(async (campaign) => {
-        const campaignObj = campaign.toObject();
+    const campaignIds = campaigns.map((campaign) => campaign._id);
+    const campaignMetrics = campaignIds.length
+      ? await Url.aggregate<{
+          _id: string;
+          totalClicks: number;
+          totalUniqueVisitors: number;
+        }>([
+          {
+            $match: {
+              campaignId: { $in: campaignIds },
+            },
+          },
+          {
+            $group: {
+              _id: "$campaignId",
+              totalClicks: { $sum: { $ifNull: ["$clicks", 0] } },
+              totalUniqueVisitors: {
+                $sum: { $ifNull: ["$uniqueVisitors", 0] },
+              },
+            },
+          },
+        ])
+      : [];
 
-        // Get all URLs for this campaign
-        const urls = await Url.find({ campaignId: campaign._id });
-
-        // Calculate totals
-        const totalClicks = urls.reduce(
-          (sum, url) => sum + (url.clicks || 0),
-          0
-        );
-        const totalUniqueVisitors = urls.reduce(
-          (sum, url) => sum + (url.uniqueVisitors || 0),
-          0
-        );
-
-        return {
-          ...campaignObj,
-          totalClicks,
-          totalUniqueVisitors,
-        };
-      })
+    const metricsByCampaignId = new Map(
+      campaignMetrics.map((metric) => [String(metric._id), metric])
     );
+
+    const campaignsWithMetrics = campaigns.map((campaign) => {
+      const campaignObj = campaign.toObject();
+      const metric = metricsByCampaignId.get(String(campaign._id));
+
+      return {
+        ...campaignObj,
+        totalClicks: metric?.totalClicks ?? 0,
+        totalUniqueVisitors: metric?.totalUniqueVisitors ?? 0,
+      };
+    });
 
     return NextResponse.json(
       {

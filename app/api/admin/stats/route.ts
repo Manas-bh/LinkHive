@@ -1,27 +1,19 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
 import dbConnect from "@/lib/dbConnect";
 import User from "@/model/userModel";
 import Url from "@/model/urlModel";
 import Campaign from "@/model/campaignModel";
+import { getAuthenticatedAdmin } from "@/lib/api/auth";
 
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
-      );
-    }
-
     await dbConnect();
 
-    const user = await User.findOne({ email: session.user.email });
-    if (!user || user.role !== "admin") {
+    const authResult = await getAuthenticatedAdmin("_id role");
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Forbidden: Admin access required" },
-        { status: 403 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
@@ -58,10 +50,13 @@ export async function GET() {
         recentUsers,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching admin stats:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Internal Server Error" },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Internal Server Error",
+      },
       { status: 500 }
     );
   }

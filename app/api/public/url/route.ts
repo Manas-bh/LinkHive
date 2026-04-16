@@ -3,28 +3,15 @@ import { nanoid } from "nanoid";
 import Url from "@/model/urlModel";
 import dbConnect from "@/lib/dbConnect";
 import { generateQRCode } from "@/lib/qrcode";
+import { isValidSlugSegment, normalizeSlugSegment } from "@/lib/api/slug";
+import { getDefaultUrlExpiryDate, parseExpiryInput } from "@/lib/api/urlExpiry";
+import { isDuplicateKeyError } from "@/lib/api/errors";
+import { normalizeHttpUrl } from "@/lib/api/urlValidation";
 
 interface CreatePublicUrlRequest {
   url: string;
   customAlias?: string;
-  expiresAt?: string;
-}
-
-function normalizeSlugSegment(value: string) {
-  return value.trim().toLowerCase();
-}
-
-function isValidSlugSegment(value: string) {
-  return /^[a-z0-9-]+$/.test(value);
-}
-
-function isDuplicateKeyError(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: number }).code === 11000
-  );
+  expiresAt?: string | null;
 }
 
 export async function POST(request: NextRequest) {
@@ -40,11 +27,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    try {
-      new URL(url);
-    } catch {
+    const normalizedUrl = normalizeHttpUrl(url);
+    if (!normalizedUrl) {
       return NextResponse.json(
-        { success: false, error: "Invalid URL format" },
+        { success: false, error: "Invalid URL format. Provide a valid http(s) URL" },
         { status: 400 }
       );
     }
@@ -76,15 +62,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const parsedExpiry = parseExpiryInput(expiresAt);
+    if (parsedExpiry.kind === "invalid") {
+      return NextResponse.json(
+        { success: false, error: parsedExpiry.error },
+        { status: 400 }
+      );
+    }
+
+    const resolvedExpiresAt =
+      parsedExpiry.kind === "valid"
+        ? parsedExpiry.date
+        : await getDefaultUrlExpiryDate();
+
     const urlCode = alias || nanoid(7);
 
     const link = new Url({
-      originalUrl: url,
+      originalUrl: normalizedUrl,
       urlCode,
       customAlias: alias,
       clickDetails: [],
       status: "active",
-      expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+      expiresAt: resolvedExpiresAt,
     });
 
     await link.save();
@@ -109,7 +108,7 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Public URL error:", error);
 
     if (isDuplicateKeyError(error)) {
@@ -120,7 +119,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { success: false, error: error.message || "Failed to create link" },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to create link",
+      },
       { status: 500 }
     );
   }

@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
-import { auth } from "@/auth";
-import User from "@/model/userModel";
 import Url from "@/model/urlModel";
 import {
   aggregateByBrowser,
@@ -10,29 +8,29 @@ import {
   aggregateByOS,
   aggregateClicksByDay,
 } from "@/lib/analytics";
+import { getAuthenticatedUser } from "@/lib/api/auth";
+import { parseBoundedInteger } from "@/lib/api/query";
 
 export async function GET(request: NextRequest) {
   try {
     await dbConnect();
 
-    const session = await auth();
-    if (!session?.user?.email) {
+    const authResult = await getAuthenticatedUser("_id");
+    if ("error" in authResult) {
       return NextResponse.json(
-        { success: false, error: "Authentication required" },
-        { status: 401 }
+        { success: false, error: authResult.error },
+        { status: authResult.status }
       );
     }
 
-    const user = await User.findOne({ email: session.user.email });
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
+    const user = authResult.user;
 
     const searchParams = request.nextUrl.searchParams;
-    const days = parseInt(searchParams.get("days") || "30", 10);
+    const days = parseBoundedInteger(searchParams.get("days"), {
+      fallback: 30,
+      min: 1,
+      max: 365,
+    });
 
     const urls = await Url.find({ userId: user._id }).sort({ createdAt: -1 });
 

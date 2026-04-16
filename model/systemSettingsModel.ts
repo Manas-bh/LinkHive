@@ -30,6 +30,8 @@ const SystemSettingsSchema = new Schema<ISystemSettings>({
     },
 });
 
+SystemSettingsSchema.index({ updatedAt: -1 });
+
 // Singleton pattern: ensure only one settings document exists
 const SystemSettings = mongoose.models.SystemSettings || mongoose.model<ISystemSettings>('SystemSettings', SystemSettingsSchema);
 

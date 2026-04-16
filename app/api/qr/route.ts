@@ -27,10 +27,13 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: { qrCode } });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("QR generation error:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Failed to generate QR" },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to generate QR",
+      },
       { status: 500 }
     );
   }
